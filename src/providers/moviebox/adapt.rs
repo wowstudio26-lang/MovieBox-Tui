@@ -633,7 +633,10 @@ pub fn moviebox_resource_item_to_release(item: &serde_json::Value) -> Release {
         mirrors.push(SourceMirror {
             label,
             resolver_url: link.to_string(),
-            headers: vec![],
+            headers: vec![(
+                "Referer".to_string(),
+                crate::providers::moviebox::STREAM_REFERER.to_string(),
+            )],
             direct_file: true,
         });
     }
