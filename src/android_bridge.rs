@@ -1,6 +1,6 @@
+use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{jint, jstring};
-use jni::JNIEnv;
 
 use crate::providers::models::ProviderKind;
 use crate::service::MovieBoxService;
@@ -225,7 +225,9 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativePlaybac
                             let resolution = release.resolution_u64();
                             let mirror = release.mirrors.into_iter().next()?;
                             Some(AndroidPlaybackOption {
-                                quality: release.quality.unwrap_or_else(|| format!("{resolution}p")),
+                                quality: release
+                                    .quality
+                                    .unwrap_or_else(|| format!("{resolution}p")),
                                 resolution,
                                 url: mirror.resolver_url,
                                 headers: mirror.headers,
@@ -245,7 +247,8 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativePlaybac
                             options,
                             error: None,
                         }
-                    }                }
+                    }
+                }
                 Err(error) => AndroidPlaybackResponse {
                     ok: false,
                     options: Vec::new(),
