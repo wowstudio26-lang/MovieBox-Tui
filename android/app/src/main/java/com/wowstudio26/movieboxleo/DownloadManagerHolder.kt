@@ -102,19 +102,57 @@ object DownloadManagerHolder {
         val request = DownloadRequest.Builder(id, Uri.parse(url))
             .setData(requestData)
             .build()
-        manager(context).addDownload(request)
+        androidx.media3.exoplayer.offline.DownloadService.sendAddDownload(
+            context,
+            MovieBoxLeoDownloadService::class.java,
+            request,
+            false
+        )
     }
 
     fun removeDownload(context: Context, id: String) {
-        manager(context).removeDownload(id)
+        androidx.media3.exoplayer.offline.DownloadService.sendRemoveDownload(
+            context,
+            MovieBoxLeoDownloadService::class.java,
+            id,
+            false
+        )
+    }
+
+    fun pauseDownload(context: Context, id: String) {
+        androidx.media3.exoplayer.offline.DownloadService.sendSetStopReason(
+            context,
+            MovieBoxLeoDownloadService::class.java,
+            id,
+            1,
+            false
+        )
+    }
+
+    fun resumeDownload(context: Context, id: String) {
+        androidx.media3.exoplayer.offline.DownloadService.sendSetStopReason(
+            context,
+            MovieBoxLeoDownloadService::class.java,
+            id,
+            Download.STOP_REASON_NONE,
+            false
+        )
     }
 
     fun pauseDownloads(context: Context) {
-        manager(context).pauseDownloads()
+        androidx.media3.exoplayer.offline.DownloadService.sendPauseDownloads(
+            context,
+            MovieBoxLeoDownloadService::class.java,
+            false
+        )
     }
 
     fun resumeDownloads(context: Context) {
-        manager(context).resumeDownloads()
+        androidx.media3.exoplayer.offline.DownloadService.sendResumeDownloads(
+            context,
+            MovieBoxLeoDownloadService::class.java,
+            false
+        )
     }
 
     fun downloads(context: Context): List<LeoDownloadItem> {
