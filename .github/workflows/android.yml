@@ -24,7 +24,7 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865"
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0" "ndk;29.0.14206865"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -37,9 +37,9 @@ jobs:
 
       - name: Install Gradle
         run: |
-          curl -L -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.13-bin.zip
+          curl -L -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-9.3.1-bin.zip
           unzip -q /tmp/gradle.zip -d /opt
-          echo "/opt/gradle-8.13/bin" >> "$GITHUB_PATH"
+          echo "/opt/gradle-9.3.1/bin" >> "$GITHUB_PATH"
 
       - name: Build APK
         working-directory: android
