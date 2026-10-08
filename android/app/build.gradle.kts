@@ -58,6 +58,7 @@ dependencies {
     implementation("androidx.media3:media3-database:1.11.1")
     implementation("androidx.media3:media3-datasource:1.11.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
     implementation("androidx.media3:media3-ui:1.11.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
