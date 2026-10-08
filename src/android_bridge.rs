@@ -1,5 +1,5 @@
 use jni::objects::{JClass, JString};
-use jni::sys::jstring;
+use jni::sys::{jint, jstring};
 use jni::JNIEnv;
 
 use crate::providers::models::ProviderKind;
@@ -177,6 +177,8 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativePlaybac
     mut env: JNIEnv,
     _class: JClass,
     subject_id: JString,
+    season: jint,
+    episode: jint,
 ) -> jstring {
     let subject_id: String = match env.get_string(&subject_id) {
         Ok(value) => value.into(),
@@ -203,7 +205,11 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativePlaybac
             let service = MovieBoxService::new();
             match service
                 .client
-                .episode_streams(subject_id.trim(), 0, 0)
+                .episode_streams(
+                    subject_id.trim(),
+                    season.max(0) as usize,
+                    episode.max(0) as usize,
+                )
                 .await
             {
                 Ok(releases) => {
