@@ -485,8 +485,9 @@ pub fn moviebox_details_json_to_media_details(
         });
     }
 
-    dubs.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
-    dubs.dedup_by(|a, b| a.subject_id == b.subject_id);
+    // Preserve provider order so the original track remains first when the API provides it first.
+    let mut seen_subject_ids = std::collections::HashSet::new();
+    dubs.retain(|dub| seen_subject_ids.insert(dub.subject_id.clone()));
 
     Ok(MediaDetails {
         id: ProviderMediaId {
