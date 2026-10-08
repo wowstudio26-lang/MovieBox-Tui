@@ -26,6 +26,11 @@ data class MediaDetails(
     val genres: List<String>
 )
 
+data class PlaybackInfo(
+    val url: String,
+    val headers: Map<String, String>
+)
+
 object RustBridge {
     private var loadError: String? = null
 
@@ -39,21 +44,28 @@ object RustBridge {
 
     fun search(query: String): Result<List<SearchResult>> {
         loadError?.let { return Result.failure(IllegalStateException(it)) }
+
         return runCatching {
             val root = JSONObject(nativeSearch(query))
-            if (!root.optBoolean("ok", false)) throw IllegalStateException(root.optString("error", "Rust search failed"))
+            if (!root.optBoolean("ok", false)) {
+                throw IllegalStateException(root.optString("error", "Rust search failed"))
+            }
             val array = root.optJSONArray("results")
             buildList {
-                if (array != null) for (index in 0 until array.length()) {
-                    val item = array.getJSONObject(index)
-                    add(SearchResult(
-                        id = item.optString("id"),
-                        title = item.optString("title"),
-                        year = item.optString("year"),
-                        mediaType = item.optString("media_type"),
-                        posterUrl = item.optString("poster_url").takeIf { it.isNotBlank() },
-                        provider = item.optString("provider")
-                    ))
+                if (array != null) {
+                    for (index in 0 until array.length()) {
+                        val item = array.getJSONObject(index)
+                        add(
+                            SearchResult(
+                                id = item.optString("id"),
+                                title = item.optString("title"),
+                                year = item.optString("year"),
+                                mediaType = item.optString("media_type"),
+                                posterUrl = item.optString("poster_url").takeIf { it.isNotBlank() },
+                                provider = item.optString("provider")
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -61,9 +73,15 @@ object RustBridge {
 
     fun details(id: String): Result<MediaDetails> {
         loadError?.let { return Result.failure(IllegalStateException(it)) }
+
         return runCatching {
             val root = JSONObject(nativeDetails(id))
-            if (!root.optBoolean("ok", false)) throw IllegalStateException(root.optString("error", "Unable to load details"))
+            if (!root.optBoolean("ok", false)) {
+                throw IllegalStateException(
+                    root.optString("error", "Unable to load details")
+                )
+            }
+
             val item = root.getJSONObject("details")
             MediaDetails(
                 id = item.optJSONObject("id")?.optString("value").orEmpty(),
@@ -79,18 +97,43 @@ object RustBridge {
                 duration = item.optString("duration"),
                 genres = buildList {
                     val genres = item.optJSONArray("genres")
-                    if (genres != null) for (i in 0 until genres.length()) add(genres.optString(i))
+                    if (genres != null) {
+                        for (i in 0 until genres.length()) {
+                            add(genres.optString(i))
+                        }
+                    }
                 }
             )
         }
     }
 
-    fun playbackUrl(id: String): Result<String> {
+    fun playback(id: String): Result<PlaybackInfo> {
         loadError?.let { return Result.failure(IllegalStateException(it)) }
+
         return runCatching {
             val root = JSONObject(nativePlayback(id))
-            if (!root.optBoolean("ok", false)) throw IllegalStateException(root.optString("error", "No playable stream found"))
-            root.optString("url").takeIf { it.isNotBlank() } ?: throw IllegalStateException("No playable stream URL found")
+            if (!root.optBoolean("ok", false)) {
+                throw IllegalStateException(
+                    root.optString("error", "No playable stream found")
+                )
+            }
+
+            val url = root.optString("url").takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException("No playable stream URL found")
+
+            val headers = buildMap {
+                val array = root.optJSONArray("headers")
+                if (array != null) {
+                    for (i in 0 until array.length()) {
+                        val pair = array.getJSONArray(i)
+                        if (pair.length() >= 2) {
+                            put(pair.optString(0), pair.optString(1))
+                        }
+                    }
+                }
+            }
+
+            PlaybackInfo(url, headers)
         }
     }
 
