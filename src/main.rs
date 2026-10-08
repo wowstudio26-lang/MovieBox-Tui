@@ -85,7 +85,9 @@ async fn main() -> std::io::Result<()> {
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!("MovieBox Leo {}", env!("CARGO_PKG_VERSION"));
-        println!("MovieBox Leo — a terminal client for finding and streaming movies, TV shows, and anime.\n");
+        println!(
+            "MovieBox Leo — a terminal client for finding and streaming movies, TV shows, and anime.\n"
+        );
         println!("USAGE:");
         println!("    moviebox-tui [OPTIONS]\n");
         println!("OPTIONS:");
