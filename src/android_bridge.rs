@@ -165,10 +165,17 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativeDetails
 }
 
 #[derive(serde::Serialize)]
+struct AndroidPlaybackOption {
+    quality: String,
+    resolution: u64,
+    url: String,
+    headers: Vec<(String, String)>,
+}
+
+#[derive(serde::Serialize)]
 struct AndroidPlaybackResponse {
     ok: bool,
-    url: Option<String>,
-    headers: Vec<(String, String)>,
+    options: Vec<AndroidPlaybackOption>,
     error: Option<String>,
 }
 
@@ -186,8 +193,7 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativePlaybac
             return env
                 .new_string(json_response(AndroidPlaybackResponse {
                     ok: false,
-                    url: None,
-                    headers: Vec::new(),
+                    options: Vec::new(),
                     error: Some(format!("invalid subject id: {error}")),
                 }))
                 .map(|value| value.into_raw())
@@ -213,38 +219,43 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativePlaybac
                 .await
             {
                 Ok(releases) => {
-                    let source = releases
+                    let options = releases
                         .into_iter()
-                        .filter_map(|release| release.mirrors.into_iter().next())
-                        .next();
+                        .filter_map(|release| {
+                            let mirror = release.mirrors.into_iter().next()?;
+                            let resolution = release.resolution_u64();
+                            Some(AndroidPlaybackOption {
+                                quality: release.quality.unwrap_or_else(|| format!("{resolution}p")),
+                                resolution,
+                                url: mirror.resolver_url,
+                                headers: mirror.headers,
+                            })
+                        })
+                        .collect::<Vec<_>>();
 
-                    match source {
-                        Some(mirror) => AndroidPlaybackResponse {
-                            ok: true,
-                            url: Some(mirror.resolver_url),
-                            headers: mirror.headers,
-                            error: None,
-                        },
-                        None => AndroidPlaybackResponse {
+                    if options.is_empty() {
+                        AndroidPlaybackResponse {
                             ok: false,
-                            url: None,
-                            headers: Vec::new(),
+                            options: Vec::new(),
                             error: Some("No playable stream URL found".to_string()),
-                        },
-                    }
-                }
+                        }
+                    } else {
+                        AndroidPlaybackResponse {
+                            ok: true,
+                            options,
+                            error: None,
+                        }
+                    }                }
                 Err(error) => AndroidPlaybackResponse {
                     ok: false,
-                    url: None,
-                    headers: Vec::new(),
+                    options: Vec::new(),
                     error: Some(error.to_string()),
                 },
             }
         }),
         Err(error) => AndroidPlaybackResponse {
             ok: false,
-            url: None,
-            headers: Vec::new(),
+            options: Vec::new(),
             error: Some(format!("Rust runtime error: {error}")),
         },
     };
