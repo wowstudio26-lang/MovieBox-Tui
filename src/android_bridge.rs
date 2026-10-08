@@ -102,3 +102,95 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativeSearch(
         .map(|value| value.into_raw())
         .unwrap_or(std::ptr::null_mut())
 }
+
+
+#[derive(serde::Serialize)]
+struct AndroidDetailsResponse {
+    ok: bool,
+    details: Option<crate::providers::models::MediaDetails>,
+    error: Option<String>,
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativeDetails(
+    mut env: JNIEnv,
+    _class: JClass,
+    subject_id: JString,
+) -> jstring {
+    let subject_id: String = match env.get_string(&subject_id) {
+        Ok(value) => value.into(),
+        Err(error) => {
+            return env.new_string(json_response(AndroidDetailsResponse {
+                ok: false, details: None, error: Some(format!("invalid subject id: {error}"))
+            })).map(|v| v.into_raw()).unwrap_or(std::ptr::null_mut());
+        }
+    };
+
+    let response = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+        Ok(runtime) => runtime.block_on(async move {
+            let service = MovieBoxService::new();
+            match service.details_typed(ProviderKind::MovieBox, subject_id.trim()).await {
+                Ok(details) => AndroidDetailsResponse { ok: true, details: Some(details), error: None },
+                Err(error) => AndroidDetailsResponse { ok: false, details: None, error: Some(error.to_string()) },
+            }
+        }),
+        Err(error) => AndroidDetailsResponse {
+            ok: false, details: None, error: Some(format!("Rust runtime error: {error}"))
+        },
+    };
+
+    env.new_string(json_response(response))
+        .map(|value| value.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
+#[derive(serde::Serialize)]
+struct AndroidPlaybackResponse {
+    ok: bool,
+    url: Option<String>,
+    error: Option<String>,
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativePlayback(
+    mut env: JNIEnv,
+    _class: JClass,
+    subject_id: JString,
+) -> jstring {
+    let subject_id: String = match env.get_string(&subject_id) {
+        Ok(value) => value.into(),
+        Err(error) => {
+            return env.new_string(json_response(AndroidPlaybackResponse {
+                ok: false, url: None, error: Some(format!("invalid subject id: {error}"))
+            })).map(|v| v.into_raw()).unwrap_or(std::ptr::null_mut());
+        }
+    };
+
+    let response = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+        Ok(runtime) => runtime.block_on(async move {
+            use crate::providers::ReleaseProvider;
+            let service = MovieBoxService::new();
+            match service.client.episode_streams(subject_id.trim(), 0, 0).await {
+                Ok(releases) => {
+                    let url = releases.into_iter().find_map(|release| {
+                        release.mirrors.first().map(|mirror| mirror.resolver_url.clone())
+                    });
+                    match url {
+                        Some(url) => AndroidPlaybackResponse { ok: true, url: Some(url), error: None },
+                        None => AndroidPlaybackResponse {
+                            ok: false, url: None, error: Some("No playable stream URL found".to_string())
+                        },
+                    }
+                }
+                Err(error) => AndroidPlaybackResponse { ok: false, url: None, error: Some(error.to_string()) },
+            }
+        }),
+        Err(error) => AndroidPlaybackResponse {
+            ok: false, url: None, error: Some(format!("Rust runtime error: {error}"))
+        },
+    };
+
+    env.new_string(json_response(response))
+        .map(|value| value.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
