@@ -403,7 +403,16 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                             selectedLanguageId = selectedLanguageId,
                             options = info.options,
                             initialResolution = info.defaultOption.resolution,
-                            onLanguageChange = { selectedLanguageId = it },
+                            onLanguageChange = { languageId ->
+                                selectedLanguageId = languageId
+                                scope.launch {
+                                    val resolved = withContext(Dispatchers.IO) {
+                                        RustBridge.playback(languageId, selectedSeason, selectedEpisode)
+                                    }
+                                    resolved.onSuccess { downloadSelectionInfo = it }
+                                        .onFailure { error = it.message ?: "Unable to resolve selected audio" }
+                                }
+                            },
                             onConfirm = { resolution ->
                                 val option = info.options.firstOrNull { it.resolution == resolution } ?: info.defaultOption
                                 if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -441,7 +450,7 @@ private fun DownloadSelectionDialog(
     onConfirm: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selectedResolution by remember { mutableIntStateOf(initialResolution) }
+    var selectedResolution by remember(options) { mutableIntStateOf(initialResolution) }
     var languageMenuOpen by remember { mutableStateOf(false) }
     var resolutionMenuOpen by remember { mutableStateOf(false) }
 
