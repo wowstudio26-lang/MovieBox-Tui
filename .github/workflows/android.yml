@@ -41,9 +41,23 @@ jobs:
           unzip -q /tmp/gradle.zip -d /opt
           echo "/opt/gradle-8.13/bin" >> "$GITHUB_PATH"
 
+      - name: Verify Rust native library
+        run: |
+          test -f android/app/src/main/jniLibs/arm64-v8a/libmoviebox_tui.so
+          ls -lh android/app/src/main/jniLibs/arm64-v8a/libmoviebox_tui.so
+
       - name: Build APK
         working-directory: android
         run: gradle assembleDebug --no-daemon
+
+      - name: Verify native library is packaged
+        run: |
+          unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep -E 'lib/arm64-v8a/libmoviebox_tui\.so
+        uses: actions/upload-artifact@v5
+        with:
+          name: moviebox-leo-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
 
       - name: Upload APK
         uses: actions/upload-artifact@v5
