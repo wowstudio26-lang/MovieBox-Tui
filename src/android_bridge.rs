@@ -27,7 +27,7 @@ struct AndroidSearchResponse {
     error: Option<String>,
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativeSearch(
     mut env: JNIEnv,
     _class: JClass,
