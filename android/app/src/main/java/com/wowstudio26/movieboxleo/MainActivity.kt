@@ -1,7 +1,10 @@
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.wowstudio26.movieboxleo
 
-import android.content.Intent
-import android.net.Uri
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -27,9 +30,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.media3.common.MediaItem
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.text.font.FontWeight
@@ -185,7 +190,10 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var playing by remember { mutableStateOf(false) }
     var playbackInfo by remember { mutableStateOf<PlaybackInfo?>(null) }
+    var downloadBusy by remember { mutableStateOf(false) }
+    var downloadMessage by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     BackHandler { onBack() }
 
@@ -231,27 +239,81 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
 
                     Spacer(Modifier.height(20.dp))
                     if (playbackInfo == null) {
-                        Button(
-                            onClick = {
-                                if (playing) return@Button
-                                playing = true
-                                error = null
-                                scope.launch {
-                                    val playback =
-                                        withContext(Dispatchers.IO) { RustBridge.playback(result.id) }
-                                    playback.onSuccess { info ->
-                                        playbackInfo = info
-                                    }.onFailure {
-                                        error = it.message ?: "Unable to resolve stream"
-                                    }
-                                    playing = false
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(Icons.Default.PlayArrow, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (playing) "Resolving stream…" else "Play")
+                            Button(
+                                onClick = {
+                                    if (playing || downloadBusy) return@Button
+                                    playing = true
+                                    error = null
+                                    scope.launch {
+                                        val playback =
+                                            withContext(Dispatchers.IO) { RustBridge.playback(result.id) }
+                                        playback.onSuccess { info ->
+                                            playbackInfo = info
+                                        }.onFailure {
+                                            error = it.message ?: "Unable to resolve stream"
+                                        }
+                                        playing = false
+                                    }
+                                },
+                                enabled = !downloadBusy,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (playing) "Resolving…" else "Play")
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    if (playing || downloadBusy) return@OutlinedButton
+                                    downloadBusy = true
+                                    error = null
+                                    downloadMessage = null
+                                    scope.launch {
+                                        val playback =
+                                            withContext(Dispatchers.IO) { RustBridge.playback(result.id) }
+                                        playback.onSuccess { info ->
+                                            if (Build.VERSION.SDK_INT >= 33 &&
+                                                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                                            ) {
+                                                (context as? MainActivity)?.requestPermissions(
+                                                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                                    4102
+                                                )
+                                            }
+                                            DownloadManagerHolder.addDownload(
+                                                context = context,
+                                                id = "moviebox:${result.id}",
+                                                url = info.url,
+                                                title = item.title,
+                                                posterUrl = item.posterUrl,
+                                                headers = info.headers
+                                            )
+                                            downloadMessage = "Added to Downloads"
+                                        }.onFailure {
+                                            error = it.message ?: "Unable to prepare download"
+                                        }
+                                        downloadBusy = false
+                                    }
+                                },
+                                enabled = !playing,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Download, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (downloadBusy) "Preparing…" else "Download")
+                            }
+                        }
+                        downloadMessage?.let {
+                            Text(
+                                it,
+                                Modifier.padding(top = 8.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
                     } else {
                         PlaybackPlayer(playbackInfo!!)
@@ -272,14 +334,143 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
 
 @Composable
 private fun LibraryScreen() {
-    Column(Modifier.fillMaxSize().padding(18.dp)) {
-        Text("Library", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(16.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(Icons.Default.FavoriteBorder, null)
-            Text("Favorites and downloads will use the Rust data model.")
+    var downloads by remember { mutableStateOf<List<LeoDownloadItem>>(emptyList()) }
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            downloads = withContext(Dispatchers.IO) { DownloadManagerHolder.downloads(context) }
+            kotlinx.coroutines.delay(1000)
         }
     }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)
+    ) {
+        Text("Library", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Offline downloads",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(14.dp))
+
+        if (downloads.isEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Download, null)
+                Text("No downloads yet. Open a movie or episode and tap Download.")
+            }
+        } else {
+            downloads.forEach { item ->
+                DownloadLibraryCard(item)
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadLibraryCard(item: LeoDownloadItem) {
+    val context = LocalContext.current
+    var playOffline by remember(item.id) { mutableStateOf(false) }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+            Text(
+                item.title,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(6.dp))
+            val percent = if (item.percent >= 0f) "${item.percent.toInt()}%" else "Preparing"
+            Text(
+                when (item.state) {
+                    Download.STATE_COMPLETED -> "Completed • Offline ready"
+                    Download.STATE_DOWNLOADING -> "Downloading • $percent"
+                    Download.STATE_QUEUED -> "Queued • $percent"
+                    Download.STATE_FAILED -> "Failed"
+                    Download.STATE_REMOVING -> "Removing…"
+                    else -> percent
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (item.state == Download.STATE_DOWNLOADING || item.state == Download.STATE_QUEUED) {
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { (item.percent / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (item.state == Download.STATE_COMPLETED) {
+                    OutlinedButton(onClick = { playOffline = true }) {
+                        Icon(Icons.Default.PlayArrow, null)
+                        Spacer(Modifier.width(5.dp))
+                        Text("Play Offline")
+                    }
+                } else if (item.state == Download.STATE_DOWNLOADING || item.state == Download.STATE_QUEUED) {
+                    OutlinedButton(onClick = { DownloadManagerHolder.pauseDownloads(context) }) {
+                        Text("Pause")
+                    }
+                } else if (item.state == Download.STATE_FAILED) {
+                    OutlinedButton(onClick = { DownloadManagerHolder.resumeDownloads(context) }) {
+                        Text("Retry")
+                    }
+                }
+                OutlinedButton(onClick = { DownloadManagerHolder.removeDownload(context, item.id) }) {
+                    Text("Remove")
+                }
+            }
+
+            if (playOffline && item.state == Download.STATE_COMPLETED) {
+                OfflineDownloadPlayer(item.id)
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineDownloadPlayer(id: String) {
+    val context = LocalContext.current
+    val download = remember(id) {
+        runCatching { DownloadManagerHolder.index(context).getDownload(id) }.getOrNull()
+    } ?: return
+
+    val player = remember(id) {
+        val cacheDataSourceFactory = DownloadManagerHolder.cachedPlaybackDataSourceFactory(context)
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+            .build()
+            .apply {
+                setMediaItem(download.request.toMediaItem())
+                prepare()
+                playWhenReady = true
+            }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+
+    AndroidView(
+        factory = { viewContext ->
+            PlayerView(viewContext).apply {
+                this.player = player
+                useController = true
+            }
+        },
+        update = { it.player = player },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp)
+    )
 }
 
 @Composable
