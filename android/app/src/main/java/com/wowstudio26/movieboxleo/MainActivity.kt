@@ -212,7 +212,21 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
     BackHandler { onBack() }
 
     LaunchedEffect(result.id) {
-        val loaded = withContext(Dispatchers.IO) { RustBridge.details(result.id) }
+        val loaded = runCatching {
+            kotlinx.coroutines.withTimeout(20_000L) {
+                withContext(Dispatchers.IO) { RustBridge.details(result.id) }
+            }
+        }.getOrElse {
+            Result.failure<MediaDetails>(
+                IllegalStateException(
+                    if (it is kotlinx.coroutines.TimeoutCancellationException) {
+                        "MovieBox details timed out. Check your connection and try again."
+                    } else {
+                        it.message ?: "Unable to load details"
+                    }
+                )
+            )
+        }
         loaded.onSuccess { details = it }.onFailure { error = it.message ?: "Unable to load details" }
         loading = false
     }
@@ -685,33 +699,37 @@ private fun PlaybackPlayer(
     val activity = context as? MainActivity
     var player by remember { mutableStateOf<ExoPlayer?>(null) }
     var resolutionMenuOpen by remember { mutableStateOf(false) }
+    var playbackError by remember(playbackInfo, selectedResolution) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(playbackInfo, selectedResolution) {
-        val option = playbackInfo.options.firstOrNull { it.resolution == selectedResolution } ?: playbackInfo.defaultOption
+        val option = playbackInfo.options.firstOrNull { it.resolution == selectedResolution }
+            ?: playbackInfo.defaultOption
         player?.release()
+        playbackError = null
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(option.headers)
-        val cleanUrl = option.url.substringBefore('?').lowercase()
-        val mimeType = when {
-            cleanUrl.endsWith(".mpd") -> MimeTypes.APPLICATION_MPD
-            cleanUrl.endsWith(".m3u8") -> MimeTypes.APPLICATION_M3U8
-            else -> MimeTypes.VIDEO_MP4
+        val uriPath = runCatching {
+            android.net.Uri.parse(option.url).path.orEmpty().lowercase()
+        }.getOrDefault("")
+        val mediaItemBuilder = MediaItem.Builder().setUri(option.url)
+        when {
+            uriPath.endsWith(".mpd") -> mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_MPD)
+            uriPath.endsWith(".m3u8") -> mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
         }
-        val mediaItem = MediaItem.Builder()
-            .setUri(option.url)
-            .setMimeType(mimeType)
-            .build()
         player = ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
             .apply {
                 addListener(object : androidx.media3.common.Player.Listener {
-                    override fun onPlayerError(playbackError: androidx.media3.common.PlaybackException) {
-                        android.util.Log.e("MovieBoxLeo", "Playback failed: " + playbackError.errorCodeName, playbackError)
+                    override fun onPlayerError(playbackErrorValue: androidx.media3.common.PlaybackException) {
+                        val detail = playbackErrorValue.cause?.message?.takeIf { it.isNotBlank() }
+                        playbackError = playbackErrorValue.errorCodeName +
+                            (detail?.let { ": $it" } ?: "")
+                        android.util.Log.e("MovieBoxLeo", "Playback failed: $playbackError", playbackErrorValue)
                     }
                 })
-                setMediaItem(mediaItem)
+                setMediaItem(mediaItemBuilder.build())
                 prepare()
                 playWhenReady = true
             }
@@ -738,23 +756,64 @@ private fun PlaybackPlayer(
 
     Dialog(
         onDismissRequest = onClose,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnBackPress = true, dismissOnClickOutside = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false
+        )
     ) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             AndroidView(
-                factory = { viewContext -> PlayerView(viewContext).apply { useController = true; controllerAutoShow = true } },
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        useController = true
+                        controllerAutoShow = true
+                    }
+                },
                 update = { it.player = player },
                 modifier = Modifier.fillMaxSize()
             )
-            Row(Modifier.align(Alignment.TopEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (playbackError != null) {
+                Card(
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF241719))
+                ) {
+                    Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Playback failed", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(playbackError!!, color = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.height(12.dp))
+                        Text("Try another resolution or exit and play again.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Box {
                     FilledTonalButton(onClick = { resolutionMenuOpen = true }) {
-                        Text(playbackInfo.options.firstOrNull { it.resolution == selectedResolution }?.quality ?: playbackInfo.defaultOption.quality)
+                        Text(
+                            playbackInfo.options.firstOrNull { it.resolution == selectedResolution }?.quality
+                                ?: playbackInfo.defaultOption.quality
+                        )
                     }
-                    DropdownMenu(expanded = resolutionMenuOpen, onDismissRequest = { resolutionMenuOpen = false }) {
-                        playbackInfo.options.distinctBy { it.resolution }.sortedByDescending { it.resolution }.forEach { option ->
-                            DropdownMenuItem(text = { Text(option.quality) }, onClick = { onResolutionChange(option.resolution); resolutionMenuOpen = false })
-                        }
+                    DropdownMenu(
+                        expanded = resolutionMenuOpen,
+                        onDismissRequest = { resolutionMenuOpen = false }
+                    ) {
+                        playbackInfo.options.distinctBy { it.resolution }
+                            .sortedByDescending { it.resolution }
+                            .forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.quality.ifBlank { option.resolution.toString() + "p" }) },
+                                    onClick = {
+                                        onResolutionChange(option.resolution)
+                                        resolutionMenuOpen = false
+                                    }
+                                )
+                            }
                     }
                 }
                 FilledTonalButton(onClick = onClose) { Text("Exit Fullscreen") }
@@ -762,4 +821,3 @@ private fun PlaybackPlayer(
         }
     }
 }
-
