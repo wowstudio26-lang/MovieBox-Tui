@@ -84,8 +84,8 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        println!("moviebox-tui {}", env!("CARGO_PKG_VERSION"));
-        println!("A terminal client for finding and streaming movies, TV shows, and anime.\n");
+        println!("MovieBox Leo {}", env!("CARGO_PKG_VERSION"));
+        println!("MovieBox Leo — a terminal client for finding and streaming movies, TV shows, and anime.\n");
         println!("USAGE:");
         println!("    moviebox-tui [OPTIONS]\n");
         println!("OPTIONS:");
@@ -110,7 +110,7 @@ async fn main() -> std::io::Result<()> {
         .iter()
         .any(|arg| arg == "--version" || arg == "-v" || arg == "-V")
     {
-        println!("moviebox-tui {}", env!("CARGO_PKG_VERSION"));
+        println!("MovieBox Leo {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
