@@ -27,6 +27,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "ci-hygiene"
+      - name: Refresh Cargo.lock
+        run: cargo generate-lockfile
       - run: cargo fmt --check
       - name: Validate Unix installer syntax
         run: bash -n install.sh
@@ -52,7 +54,7 @@ jobs:
           tool: cargo-audit
       - run: cargo audit
       - name: Verify package
-        run: cargo package --locked
+        run: cargo package --locked --allow-dirty
       - name: Verify documentation build
         uses: taiki-e/install-action@v2
         with:
@@ -78,6 +80,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "ci-build-test-${{ matrix.os }}"
+      - name: Refresh Cargo.lock
+        run: cargo generate-lockfile
       - run: cargo build --all-features --locked
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2

@@ -122,10 +122,18 @@ impl crate::providers::ReleaseProvider for client::MovieBoxClient {
             ));
         }
 
+        // Prefer real resource/file mirrors over the play-info DASH manifest.
+        // MovieBox can return a valid signed MPD that ExoPlayer cannot start on
+        // some Android devices, while the resource endpoint provides the actual
+        // downloadable media URL for the same episode.
         releases.sort_by(|left, right| {
             right
-                .resolution_u64()
-                .cmp(&left.resolution_u64())
+                .mirrors
+                .first()
+                .map(|m| m.direct_file)
+                .unwrap_or(false)
+                .cmp(&left.mirrors.first().map(|m| m.direct_file).unwrap_or(false))
+                .then_with(|| right.resolution_u64().cmp(&left.resolution_u64()))
                 .then_with(|| right.size_bytes.cmp(&left.size_bytes))
         });
 

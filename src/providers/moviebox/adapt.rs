@@ -122,38 +122,101 @@ pub fn moviebox_subject_json_to_catalog_item(s: &serde_json::Value) -> Option<Ca
 }
 
 pub fn moviebox_search_json_to_catalog(payload: &serde_json::Value) -> Vec<CatalogItem> {
+    // MovieBox has changed the search response envelope several times. First
+    // handle known envelopes, then fall back to a recursive subject scan so a
+    // harmless API wrapper change cannot turn a valid search into zero results.
     let mut items = Vec::new();
-    let subjects = payload
-        .get("data")
-        .and_then(|d| d.get("results"))
-        .or_else(|| payload.get("results"))
-        .and_then(|r| r.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|first| first.get("subjects"))
-        .and_then(|s| s.as_array());
+    let mut seen_ids = std::collections::HashSet::new();
 
-    let subjects_slice = match subjects {
-        Some(s) => s.as_slice(),
-        None => {
-            if let Some(list) = payload
-                .get("data")
-                .and_then(|d| d.get("list"))
-                .or_else(|| payload.get("list"))
-                .and_then(|l| l.as_array())
-            {
-                list.as_slice()
-            } else {
-                &[]
+    fn add_subject(
+        subject: &serde_json::Value,
+        items: &mut Vec<CatalogItem>,
+        seen_ids: &mut std::collections::HashSet<String>,
+    ) {
+        if let Some(item) = moviebox_subject_json_to_catalog_item(subject) {
+            let id = item.id.value.clone();
+            if !id.is_empty() && seen_ids.insert(id) {
+                items.push(item);
             }
-        }
-    };
-
-    for s in subjects_slice {
-        if let Some(item) = moviebox_subject_json_to_catalog_item(s) {
-            items.push(item);
         }
     }
 
+    fn collect_known(
+        value: &serde_json::Value,
+        items: &mut Vec<CatalogItem>,
+        seen_ids: &mut std::collections::HashSet<String>,
+    ) {
+        let Some(object) = value.as_object() else {
+            return;
+        };
+
+        for key in ["subjects", "list"] {
+            if let Some(array) = object.get(key).and_then(|v| v.as_array()) {
+                for subject in array {
+                    add_subject(subject, items, seen_ids);
+                    if moviebox_subject_json_to_catalog_item(subject).is_none() {
+                        collect_known(subject, items, seen_ids);
+                    }
+                }
+            }
+        }
+
+        if let Some(results) = object.get("results") {
+            match results {
+                serde_json::Value::Array(array) => {
+                    for result in array {
+                        if let Some(subjects) = result.get("subjects").and_then(|v| v.as_array()) {
+                            for subject in subjects {
+                                add_subject(subject, items, seen_ids);
+                            }
+                        } else {
+                            add_subject(result, items, seen_ids);
+                            collect_known(result, items, seen_ids);
+                        }
+                    }
+                }
+                serde_json::Value::Object(_) => collect_known(results, items, seen_ids),
+                _ => {}
+            }
+        }
+
+        if let Some(data) = object.get("data") {
+            collect_known(data, items, seen_ids);
+        }
+    }
+
+    fn collect_recursive(
+        value: &serde_json::Value,
+        items: &mut Vec<CatalogItem>,
+        seen_ids: &mut std::collections::HashSet<String>,
+    ) {
+        match value {
+            serde_json::Value::Object(object) => {
+                // A subject-like object normally has an ID and title. Recurse
+                // regardless, because some responses wrap subjects several
+                // levels deep inside result/data/items objects.
+                if (object.contains_key("subjectId") || object.contains_key("subject_id"))
+                    && object.contains_key("title")
+                {
+                    add_subject(value, items, seen_ids);
+                }
+                for child in object.values() {
+                    collect_recursive(child, items, seen_ids);
+                }
+            }
+            serde_json::Value::Array(array) => {
+                for child in array {
+                    collect_recursive(child, items, seen_ids);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    collect_known(payload, &mut items, &mut seen_ids);
+    if items.is_empty() {
+        collect_recursive(payload, &mut items, &mut seen_ids);
+    }
     items
 }
 
@@ -385,40 +448,68 @@ pub fn moviebox_details_json_to_media_details(
     }
 
     let mut dubs = Vec::new();
-    if let Some(dubs_arr) = subject.get("dubs").and_then(|d| d.as_array()) {
-        for d in dubs_arr {
-            let subject_id = d
-                .get("subjectId")
-                .or_else(|| d.get("id"))
-                .and_then(|v| {
-                    if let Some(num) = v.as_i64() {
-                        Some(num.to_string())
-                    } else {
-                        v.as_str().map(|str_val| str_val.to_string())
-                    }
-                })
-                .unwrap_or_default();
-            let language = d
-                .get("lanName")
-                .or_else(|| d.get("language"))
-                .or_else(|| d.get("lang"))
-                .and_then(|l| l.as_str())
-                .unwrap_or("Unknown")
-                .to_string();
-            let label = d
-                .get("title")
-                .or_else(|| d.get("name"))
-                .or_else(|| d.get("lanName"))
-                .and_then(|l| l.as_str())
-                .unwrap_or(&language)
-                .to_string();
-            dubs.push(AudioTrackOption {
-                subject_id,
-                language,
-                label,
-            });
+    let mut dub_values: Vec<&serde_json::Value> = Vec::new();
+
+    for key in ["dubs", "dubbed", "audioTracks", "audio_tracks"] {
+        if let Some(value) = subject.get(key) {
+            if let Some(array) = value.as_array() {
+                dub_values.extend(array.iter());
+            } else if let Some(array) = value.get("list").and_then(|v| v.as_array()) {
+                dub_values.extend(array.iter());
+            } else if let Some(array) = value.get("items").and_then(|v| v.as_array()) {
+                dub_values.extend(array.iter());
+            }
         }
     }
+
+    for d in dub_values {
+        let subject_id = d
+            .get("subjectId")
+            .or_else(|| d.get("subject_id"))
+            .or_else(|| d.get("id"))
+            .and_then(|v| {
+                if let Some(num) = v.as_i64() {
+                    Some(num.to_string())
+                } else if let Some(num) = v.as_u64() {
+                    Some(num.to_string())
+                } else {
+                    v.as_str().map(|str_val| str_val.to_string())
+                }
+            })
+            .unwrap_or_default();
+
+        if subject_id.is_empty() {
+            continue;
+        }
+
+        let language = d
+            .get("lanName")
+            .or_else(|| d.get("language"))
+            .or_else(|| d.get("lang"))
+            .or_else(|| d.get("locale"))
+            .and_then(|l| l.as_str())
+            .unwrap_or("Unknown")
+            .to_string();
+
+        let label = d
+            .get("title")
+            .or_else(|| d.get("name"))
+            .or_else(|| d.get("lanName"))
+            .or_else(|| d.get("language"))
+            .and_then(|l| l.as_str())
+            .unwrap_or(&language)
+            .to_string();
+
+        dubs.push(AudioTrackOption {
+            subject_id,
+            language,
+            label,
+        });
+    }
+
+    // Preserve provider order so the original track remains first when the API provides it first.
+    let mut seen_subject_ids = std::collections::HashSet::new();
+    dubs.retain(|dub| seen_subject_ids.insert(dub.subject_id.clone()));
 
     Ok(MediaDetails {
         id: ProviderMediaId {
@@ -542,8 +633,11 @@ pub fn moviebox_resource_item_to_release(item: &serde_json::Value) -> Release {
         mirrors.push(SourceMirror {
             label,
             resolver_url: link.to_string(),
-            headers: vec![],
-            direct_file: false,
+            headers: vec![(
+                "Referer".to_string(),
+                crate::providers::moviebox::STREAM_REFERER.to_string(),
+            )],
+            direct_file: true,
         });
     }
 
