@@ -1448,7 +1448,7 @@ pub fn draw(frame: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) 
         } else {
             theme.text_dim
         };
-        let version = Paragraph::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+        let version = Paragraph::new(format!("MovieBox Leo  •  v{}", env!("CARGO_PKG_VERSION")))
             .alignment(Alignment::Right)
             .style(version_style);
         frame.render_widget(version, version_chunks[1]);
