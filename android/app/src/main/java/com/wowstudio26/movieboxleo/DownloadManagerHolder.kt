@@ -161,7 +161,7 @@ object DownloadManagerHolder {
     }
 
     fun downloads(context: Context): List<LeoDownloadItem> {
-        val cursor = index(context).getDownloads(intArrayOf())
+        val cursor = index(context).getDownloads(*intArrayOf())
         return buildList {
             try {
                 while (cursor.moveToNext()) {
