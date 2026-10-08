@@ -26,6 +26,7 @@ android {
         applicationId = "com.wowstudio26.movieboxleo"
         minSdk = 26
         targetSdk = 36
+    ndkVersion = "29.0.14206865"
         versionCode = 1
         versionName = "0.1.0"
     }
