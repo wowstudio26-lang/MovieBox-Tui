@@ -122,13 +122,26 @@ pub fn moviebox_subject_json_to_catalog_item(s: &serde_json::Value) -> Option<Ca
 }
 
 pub fn moviebox_search_json_to_catalog(payload: &serde_json::Value) -> Vec<CatalogItem> {
-    // MovieBox has changed the search response envelope several times. Keep the
-    // adapter tolerant of the known shapes instead of silently turning a valid
-    // API response into an empty result set.
+    // MovieBox has changed the search response envelope several times. First
+    // handle known envelopes, then fall back to a recursive subject scan so a
+    // harmless API wrapper change cannot turn a valid search into zero results.
     let mut items = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
 
-    fn collect_subjects(
+    fn add_subject(
+        subject: &serde_json::Value,
+        items: &mut Vec<CatalogItem>,
+        seen_ids: &mut std::collections::HashSet<String>,
+    ) {
+        if let Some(item) = moviebox_subject_json_to_catalog_item(subject) {
+            let id = item.id.value.clone();
+            if !id.is_empty() && seen_ids.insert(id) {
+                items.push(item);
+            }
+        }
+    }
+
+    fn collect_known(
         value: &serde_json::Value,
         items: &mut Vec<CatalogItem>,
         seen_ids: &mut std::collections::HashSet<String>,
@@ -137,23 +150,12 @@ pub fn moviebox_search_json_to_catalog(payload: &serde_json::Value) -> Vec<Catal
             return;
         };
 
-        // Known search envelopes:
-        //   { data: { results: [{ subjects: [...] }] } }
-        //   { data: { results: [...] } }
-        //   { data: { subjects: [...] } }
-        //   { data: { list: [...] } }
-        //   { results: [...] } / { subjects: [...] } / { list: [...] }
         for key in ["subjects", "list"] {
             if let Some(array) = object.get(key).and_then(|v| v.as_array()) {
                 for subject in array {
-                    if let Some(item) = moviebox_subject_json_to_catalog_item(subject) {
-                        let id = item.id.value.clone();
-                        if seen_ids.insert(id) {
-                            items.push(item);
-                        }
-                    } else if subject.is_object() {
-                        // Some envelopes put another wrapper around each result.
-                        collect_subjects(subject, items, seen_ids);
+                    add_subject(subject, items, seen_ids);
+                    if moviebox_subject_json_to_catalog_item(subject).is_none() {
+                        collect_known(subject, items, seen_ids);
                     }
                 }
             }
@@ -165,36 +167,56 @@ pub fn moviebox_search_json_to_catalog(payload: &serde_json::Value) -> Vec<Catal
                     for result in array {
                         if let Some(subjects) = result.get("subjects").and_then(|v| v.as_array()) {
                             for subject in subjects {
-                                if let Some(item) = moviebox_subject_json_to_catalog_item(subject) {
-                                    let id = item.id.value.clone();
-                                    if seen_ids.insert(id) {
-                                        items.push(item);
-                                    }
-                                }
-                            }
-                        } else if moviebox_subject_json_to_catalog_item(result).is_some() {
-                            if let Some(item) = moviebox_subject_json_to_catalog_item(result) {
-                                let id = item.id.value.clone();
-                                if seen_ids.insert(id) {
-                                    items.push(item);
-                                }
+                                add_subject(subject, items, seen_ids);
                             }
                         } else {
-                            collect_subjects(result, items, seen_ids);
+                            add_subject(result, items, seen_ids);
+                            collect_known(result, items, seen_ids);
                         }
                     }
                 }
-                serde_json::Value::Object(_) => collect_subjects(results, items, seen_ids),
+                serde_json::Value::Object(_) => collect_known(results, items, seen_ids),
                 _ => {}
             }
         }
 
         if let Some(data) = object.get("data") {
-            collect_subjects(data, items, seen_ids);
+            collect_known(data, items, seen_ids);
         }
     }
 
-    collect_subjects(payload, &mut items, &mut seen_ids);
+    fn collect_recursive(
+        value: &serde_json::Value,
+        items: &mut Vec<CatalogItem>,
+        seen_ids: &mut std::collections::HashSet<String>,
+    ) {
+        match value {
+            serde_json::Value::Object(object) => {
+                // A subject-like object normally has an ID and title. Recurse
+                // regardless, because some responses wrap subjects several
+                // levels deep inside result/data/items objects.
+                if (object.contains_key("subjectId") || object.contains_key("subject_id"))
+                    && object.contains_key("title")
+                {
+                    add_subject(value, items, seen_ids);
+                }
+                for child in object.values() {
+                    collect_recursive(child, items, seen_ids);
+                }
+            }
+            serde_json::Value::Array(array) => {
+                for child in array {
+                    collect_recursive(child, items, seen_ids);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    collect_known(payload, &mut items, &mut seen_ids);
+    if items.is_empty() {
+        collect_recursive(payload, &mut items, &mut seen_ids);
+    }
     items
 }
 
