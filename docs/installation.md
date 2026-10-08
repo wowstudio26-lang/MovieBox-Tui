@@ -1,6 +1,6 @@
 # Installation
 
-MovieBox-TUI is available across macOS, Linux, Windows, and Android (Termux).
+MovieBox Leo is available across macOS, Linux, Windows, and Android (Termux).
 
 ---
 
@@ -102,7 +102,7 @@ gh attestation verify <archive-file> -R mesamirh/MovieBox-Tui
 
 ### Automated Installer (macOS, Linux, Windows, Android)
 
-Simply re-run your original install command (`curl ... | bash` or `irm ... | iex`). When MovieBox-TUI is already installed, the installer automatically detects it and displays an interactive menu:
+Simply re-run your original install command (`curl ... | bash` or `irm ... | iex`). When MovieBox Leo is already installed, the installer automatically detects it and displays an interactive menu:
 
 ```text
 MovieBox-TUI is already installed.
@@ -112,7 +112,7 @@ What would you like to do?
   3) Cancel
 ```
 
-Enter `2` to completely remove MovieBox-TUI from your system.
+Enter `2` to completely remove MovieBox Leo from your system.
 
 ### Package Managers
 
