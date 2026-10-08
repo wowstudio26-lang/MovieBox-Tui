@@ -355,7 +355,7 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                                     downloadMessage = null
                                     scope.launch {
                                         val playback =
-                                            withContext(Dispatchers.IO) { RustBridge.playback(result.id) }
+                                            withContext(Dispatchers.IO) { RustBridge.playback(result.id, selectedSeason, selectedEpisode) }
                                         playback.onSuccess { info ->
                                             if (Build.VERSION.SDK_INT >= 33 &&
                                                 context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
