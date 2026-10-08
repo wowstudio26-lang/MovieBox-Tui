@@ -612,7 +612,7 @@ pub fn moviebox_resource_item_to_release(item: &serde_json::Value) -> Release {
             label,
             resolver_url: link.to_string(),
             headers: vec![],
-            direct_file: false,
+            direct_file: true,
         });
     }
 
