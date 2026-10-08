@@ -122,38 +122,79 @@ pub fn moviebox_subject_json_to_catalog_item(s: &serde_json::Value) -> Option<Ca
 }
 
 pub fn moviebox_search_json_to_catalog(payload: &serde_json::Value) -> Vec<CatalogItem> {
+    // MovieBox has changed the search response envelope several times. Keep the
+    // adapter tolerant of the known shapes instead of silently turning a valid
+    // API response into an empty result set.
     let mut items = Vec::new();
-    let subjects = payload
-        .get("data")
-        .and_then(|d| d.get("results"))
-        .or_else(|| payload.get("results"))
-        .and_then(|r| r.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|first| first.get("subjects"))
-        .and_then(|s| s.as_array());
+    let mut seen_ids = std::collections::HashSet::new();
 
-    let subjects_slice = match subjects {
-        Some(s) => s.as_slice(),
-        None => {
-            if let Some(list) = payload
-                .get("data")
-                .and_then(|d| d.get("list"))
-                .or_else(|| payload.get("list"))
-                .and_then(|l| l.as_array())
-            {
-                list.as_slice()
-            } else {
-                &[]
+    fn collect_subjects(
+        value: &serde_json::Value,
+        items: &mut Vec<CatalogItem>,
+        seen_ids: &mut std::collections::HashSet<String>,
+    ) {
+        let Some(object) = value.as_object() else {
+            return;
+        };
+
+        // Known search envelopes:
+        //   { data: { results: [{ subjects: [...] }] } }
+        //   { data: { results: [...] } }
+        //   { data: { subjects: [...] } }
+        //   { data: { list: [...] } }
+        //   { results: [...] } / { subjects: [...] } / { list: [...] }
+        for key in ["subjects", "list"] {
+            if let Some(array) = object.get(key).and_then(|v| v.as_array()) {
+                for subject in array {
+                    if let Some(item) = moviebox_subject_json_to_catalog_item(subject) {
+                        let id = item.id.value.clone();
+                        if seen_ids.insert(id) {
+                            items.push(item);
+                        }
+                    } else if subject.is_object() {
+                        // Some envelopes put another wrapper around each result.
+                        collect_subjects(subject, items, seen_ids);
+                    }
+                }
             }
         }
-    };
 
-    for s in subjects_slice {
-        if let Some(item) = moviebox_subject_json_to_catalog_item(s) {
-            items.push(item);
+        if let Some(results) = object.get("results") {
+            match results {
+                serde_json::Value::Array(array) => {
+                    for result in array {
+                        if let Some(subjects) = result.get("subjects").and_then(|v| v.as_array()) {
+                            for subject in subjects {
+                                if let Some(item) = moviebox_subject_json_to_catalog_item(subject) {
+                                    let id = item.id.value.clone();
+                                    if seen_ids.insert(id) {
+                                        items.push(item);
+                                    }
+                                }
+                            }
+                        } else if moviebox_subject_json_to_catalog_item(result).is_some() {
+                            if let Some(item) = moviebox_subject_json_to_catalog_item(result) {
+                                let id = item.id.value.clone();
+                                if seen_ids.insert(id) {
+                                    items.push(item);
+                                }
+                            }
+                        } else {
+                            collect_subjects(result, items, seen_ids);
+                        }
+                    }
+                }
+                serde_json::Value::Object(_) => collect_subjects(results, items, seen_ids),
+                _ => {}
+            }
+        }
+
+        if let Some(data) = object.get("data") {
+            collect_subjects(data, items, seen_ids);
         }
     }
 
+    collect_subjects(payload, &mut items, &mut seen_ids);
     items
 }
 
