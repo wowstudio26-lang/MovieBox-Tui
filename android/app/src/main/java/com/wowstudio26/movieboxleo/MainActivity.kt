@@ -35,6 +35,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.offline.Download
@@ -204,6 +205,7 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
     var episodeMenuOpen by remember { mutableStateOf(false) }
     var downloadBusy by remember { mutableStateOf(false) }
     var downloadMessage by remember { mutableStateOf<String?>(null) }
+    var downloadSelectionInfo by remember { mutableStateOf<PlaybackInfo?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -378,18 +380,7 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                                     scope.launch {
                                         val playback = withContext(Dispatchers.IO) { RustBridge.playback(selectedLanguageId, selectedSeason, selectedEpisode) }
                                         playback.onSuccess { info ->
-                                            val option = info.options.firstOrNull { it.resolution == selectedResolution } ?: info.defaultOption
-                                            if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                                                (context as? MainActivity)?.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4102)
-                                            }
-                                            val downloadId = "moviebox:" + selectedLanguageId + ":s" + selectedSeason + "e" + selectedEpisode + ":r" + option.resolution
-                                            val title = if (item.seasons.isNotEmpty()) {
-                                                item.title + " • S" + selectedSeason.toString().padStart(2, '0') + "E" + selectedEpisode.toString().padStart(2, '0') + " • " + option.quality
-                                            } else {
-                                                item.title + " • " + option.quality
-                                            }
-                                            DownloadManagerHolder.addDownload(context, downloadId, option.url, title, item.posterUrl, option.headers)
-                                            downloadMessage = "Added to Downloads • " + option.quality
+                                            downloadSelectionInfo = info
                                         }.onFailure { error = it.message ?: "Unable to prepare download" }
                                         downloadBusy = false
                                     }
@@ -405,11 +396,114 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                     } else {
                         PlaybackPlayer(playbackInfo!!, selectedResolution, { selectedResolution = it }) { playbackInfo = null }
                     }
+                    downloadSelectionInfo?.let { info ->
+                        DownloadSelectionDialog(
+                            title = item.title,
+                            languages = item.dubs,
+                            selectedLanguageId = selectedLanguageId,
+                            options = info.options,
+                            initialResolution = info.defaultOption.resolution,
+                            onLanguageChange = { selectedLanguageId = it },
+                            onConfirm = { resolution ->
+                                val option = info.options.firstOrNull { it.resolution == resolution } ?: info.defaultOption
+                                if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                                    (context as? MainActivity)?.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4102)
+                                }
+                                val downloadId = "moviebox:" + selectedLanguageId + ":s" + selectedSeason + "e" + selectedEpisode + ":r" + option.resolution
+                                val title = if (item.seasons.isNotEmpty()) {
+                                    item.title + " • S" + selectedSeason.toString().padStart(2, '0') + "E" + selectedEpisode.toString().padStart(2, '0') + " • " + option.quality
+                                } else {
+                                    item.title + " • " + option.quality
+                                }
+                                DownloadManagerHolder.addDownload(context, downloadId, option.url, title, item.posterUrl, option.headers)
+                                downloadMessage = "Added to Downloads • " + option.quality
+                                downloadSelectionInfo = null
+                            },
+                            onDismiss = { downloadSelectionInfo = null }
+                        )
+                    }
+
                     Spacer(Modifier.height(30.dp))
                 }
             }
         }
     }
+}
+
+@Composable
+private fun DownloadSelectionDialog(
+    title: String,
+    languages: List<AudioTrackInfo>,
+    selectedLanguageId: String,
+    options: List<PlaybackOption>,
+    initialResolution: Int,
+    onLanguageChange: (String) -> Unit,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selectedResolution by remember { mutableIntStateOf(initialResolution) }
+    var languageMenuOpen by remember { mutableStateOf(false) }
+    var resolutionMenuOpen by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Download") },
+        text = {
+            Column {
+                Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(14.dp))
+                Text("Audio / Language", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { languageMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                        val selected = languages.firstOrNull { it.subjectId == selectedLanguageId }
+                        Text(selected?.label ?: selected?.language ?: "Original")
+                    }
+                    DropdownMenu(expanded = languageMenuOpen, onDismissRequest = { languageMenuOpen = false }) {
+                        if (languages.isEmpty()) {
+                            DropdownMenuItem(text = { Text("Original") }, onClick = { languageMenuOpen = false })
+                        } else {
+                            languages.forEach { language ->
+                                DropdownMenuItem(
+                                    text = { Text(language.label.ifBlank { language.language.ifBlank { "Original" } }) },
+                                    onClick = {
+                                        onLanguageChange(language.subjectId)
+                                        languageMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Text("Resolution", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { resolutionMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                        val selected = options.firstOrNull { it.resolution == selectedResolution }
+                        Text(selected?.quality ?: (selectedResolution.toString() + "p"))
+                    }
+                    DropdownMenu(expanded = resolutionMenuOpen, onDismissRequest = { resolutionMenuOpen = false }) {
+                        options.distinctBy { it.resolution }.sortedByDescending { it.resolution }.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.quality.ifBlank { option.resolution.toString() + "p" }) },
+                                onClick = {
+                                    selectedResolution = option.resolution
+                                    resolutionMenuOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(selectedResolution) }) { Text("Download") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
@@ -586,12 +680,32 @@ private fun PlaybackPlayer(
     LaunchedEffect(playbackInfo, selectedResolution) {
         val option = playbackInfo.options.firstOrNull { it.resolution == selectedResolution } ?: playbackInfo.defaultOption
         player?.release()
-        val dataSourceFactory = DefaultHttpDataSource.Factory().setDefaultRequestProperties(option.headers)
-        player = ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory)).build().apply {
-            setMediaItem(MediaItem.fromUri(option.url))
-            prepare()
-            playWhenReady = true
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setDefaultRequestProperties(option.headers)
+        val cleanUrl = option.url.substringBefore('?').lowercase()
+        val mimeType = when {
+            cleanUrl.endsWith(".mpd") -> MimeTypes.APPLICATION_MPD
+            cleanUrl.endsWith(".m3u8") -> MimeTypes.APPLICATION_M3U8
+            else -> MimeTypes.VIDEO_MP4
         }
+        val mediaItem = MediaItem.Builder()
+            .setUri(option.url)
+            .setMimeType(mimeType)
+            .build()
+        player = ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .build()
+            .apply {
+                addListener(object : androidx.media3.common.Player.Listener {
+                    override fun onPlayerError(playbackError: androidx.media3.common.PlaybackException) {
+                        android.util.Log.e("MovieBoxLeo", "Playback failed: " + playbackError.errorCodeName, playbackError)
+                    }
+                })
+                setMediaItem(mediaItem)
+                prepare()
+                playWhenReady = true
+            }
     }
 
     DisposableEffect(Unit) {
