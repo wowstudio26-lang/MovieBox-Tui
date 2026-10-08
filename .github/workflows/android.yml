@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: ["android-app"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
   build:
