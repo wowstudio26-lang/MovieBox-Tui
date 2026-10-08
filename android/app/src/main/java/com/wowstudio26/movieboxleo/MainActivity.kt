@@ -26,6 +26,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.PlayerView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -178,8 +184,8 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var playing by remember { mutableStateOf(false) }
+    var playbackInfo by remember { mutableStateOf<PlaybackInfo?>(null) }
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
 
     BackHandler { onBack() }
 
@@ -224,27 +230,38 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                     if (item.stars.isNotBlank()) Text("Cast: " + item.stars, Modifier.padding(top = 6.dp))
 
                     Spacer(Modifier.height(20.dp))
-                    Button(
-                        onClick = {
-                            if (playing) return@Button
-                            playing = true
-                            scope.launch {
-                                val playback = withContext(Dispatchers.IO) { RustBridge.playbackUrl(result.id) }
-                                playback.onSuccess { url ->
-                                    try {
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                    } catch (_: Throwable) {
-                                        error = "No compatible video player found."
+                    if (playbackInfo == null) {
+                        Button(
+                            onClick = {
+                                if (playing) return@Button
+                                playing = true
+                                error = null
+                                scope.launch {
+                                    val playback =
+                                        withContext(Dispatchers.IO) { RustBridge.playback(result.id) }
+                                    playback.onSuccess { info ->
+                                        playbackInfo = info
+                                    }.onFailure {
+                                        error = it.message ?: "Unable to resolve stream"
                                     }
-                                }.onFailure { error = it.message ?: "Unable to resolve stream" }
-                                playing = false
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.PlayArrow, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (playing) "Resolving stream…" else "Play")
+                                    playing = false
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.PlayArrow, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (playing) "Resolving stream…" else "Play")
+                        }
+                    } else {
+                        PlaybackPlayer(playbackInfo!!)
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = { playbackInfo = null },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Close Player")
+                        }
                     }
                     Spacer(Modifier.height(30.dp))
                 }
@@ -275,4 +292,39 @@ private fun SettingsScreen() {
         Spacer(Modifier.height(18.dp))
         Text("The Rust engine remains the source of truth for providers, downloads, history, favorites, subtitles and playback resolution.")
     }
+}
+
+
+@Composable
+private fun PlaybackPlayer(info: PlaybackInfo) {
+    val context = LocalContext.current
+    val player = remember(info.url, info.headers) {
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(info.headers)
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .build()
+            .apply {
+                setMediaItem(MediaItem.fromUri(info.url))
+                prepare()
+                playWhenReady = true
+            }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+
+    AndroidView(
+        factory = { viewContext ->
+            PlayerView(viewContext).apply {
+                this.player = player
+                useController = true
+            }
+        },
+        update = { it.player = player },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(230.dp)
+    )
 }
