@@ -1,8 +1,8 @@
 <div align="center">
 
-# Introduction
+# MovieBox Leo — Introduction
 
-**Terminal interface to find, download, and stream movies, TV shows, and live TV using local media players.**
+**MovieBox Leo — terminal interface to find, download, and stream movies, TV shows, and live TV using local media players.**
 
 [ English ](../README.md) • [ বাংলা ](../README_BN.md) • [ हिन्दी ](../README_HI.md) • [ Español ](../README_ES.md)
 
