@@ -3,14 +3,10 @@
 package com.wowstudio26.movieboxleo
 
 import android.app.Notification
-import android.app.NotificationManager
-import android.content.Context
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
-import androidx.media3.exoplayer.offline.DownloadNotificationHelper
 import androidx.media3.exoplayer.offline.DownloadService
-import java.util.List
 
 class MovieBoxLeoDownloadService : DownloadService(
     FOREGROUND_NOTIFICATION_ID,
@@ -34,14 +30,27 @@ class MovieBoxLeoDownloadService : DownloadService(
         downloads: MutableList<Download>,
         notMetRequirements: Int
     ): Notification {
-        return DownloadNotificationHelper(this, CHANNEL_ID)
-            .buildProgressNotification(
-                this,
-                android.R.drawable.stat_sys_download,
-                null,
-                "MovieBox Leo downloads",
-                downloads,
-                notMetRequirements
+        val active = downloads.filter {
+            it.state == Download.STATE_DOWNLOADING ||
+                it.state == Download.STATE_QUEUED ||
+                it.state == Download.STATE_RESTARTING
+        }
+        val known = active.map { it.percentDownloaded }.filter { it >= 0f }
+        val progress = if (known.isNotEmpty()) known.average().toInt().coerceIn(0, 100) else 0
+
+        return Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("MovieBox Leo")
+            .setContentText(
+                when {
+                    active.isEmpty() -> "Downloads"
+                    active.size == 1 -> "Downloading " + active.first().request.id
+                    else -> "Downloading " + active.size + " items"
+                }
             )
+            .setProgress(100, progress, known.isEmpty())
+            .setOngoing(true)
+            .setCategory(Notification.CATEGORY_PROGRESS)
+            .build()
     }
 }
