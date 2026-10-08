@@ -9,7 +9,7 @@ tasks.register<Exec>("buildRustAndroid") {
     commandLine(
         "cargo", "ndk",
         "-t", "arm64-v8a",
-        "-o", file("app/src/main/jniLibs"),
+        "-o", file("src/main/jniLibs"),
         "build", "--lib", "--release"
     )
 }
