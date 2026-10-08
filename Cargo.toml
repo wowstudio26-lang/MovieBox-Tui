@@ -16,7 +16,7 @@ exclude = [
 ]
 version = "0.1.26"
 edition = "2024"
-description = "Terminal interface to find, download, and stream movies, TV shows, and live TV using local media players."
+description = "MovieBox Leo — terminal interface to find, download, and stream movies, TV shows, and live TV using local media players."
 repository = "https://github.com/mesamirh/MovieBox-Tui"
 homepage = "https://github.com/mesamirh/MovieBox-Tui"
 license = "MIT OR Apache-2.0"
