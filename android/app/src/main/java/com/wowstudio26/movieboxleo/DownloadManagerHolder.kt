@@ -6,7 +6,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -43,8 +42,6 @@ object DownloadManagerHolder {
     private const val CACHE_DIR = "moviebox-leo-downloads"
     private const val META_VERSION = 1
 
-    private var initializedContext: Context? = null
-    private var databaseProvider: StandaloneDatabaseProvider? = null
     private var downloadCache: SimpleCache? = null
     private var downloadIndex: DefaultDownloadIndex? = null
     private var downloadManager: DownloadManager? = null
@@ -55,7 +52,6 @@ object DownloadManagerHolder {
         if (downloadManager != null) return
 
         val appContext = context.applicationContext
-        initializedContext = appContext
         val database = StandaloneDatabaseProvider(appContext)
         val cacheDir = File(
             appContext.getExternalFilesDir(null) ?: appContext.filesDir,
@@ -65,7 +61,6 @@ object DownloadManagerHolder {
         val index = DefaultDownloadIndex(database)
         val downloaderFactory = HeaderAwareDownloaderFactory(cache, executor)
 
-        databaseProvider = database
         downloadCache = cache
         downloadIndex = index
         downloadManager = DownloadManager(appContext, index, downloaderFactory).apply {
