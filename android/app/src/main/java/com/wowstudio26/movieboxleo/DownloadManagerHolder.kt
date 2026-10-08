@@ -23,6 +23,16 @@ import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
+data class LeoDownloadItem(
+    val id: String,
+    val title: String,
+    val state: Int,
+    val percent: Float,
+    val bytesDownloaded: Long,
+    val contentLength: Long,
+    val url: String
+)
+
 data class LeoDownloadMetadata(
     val title: String,
     val posterUrl: String?,
@@ -107,15 +117,29 @@ object DownloadManagerHolder {
         manager(context).resumeDownloads()
     }
 
-    fun downloads(context: Context): List<Download> {
+    fun downloads(context: Context): List<LeoDownloadItem> {
         val cursor = index(context).getDownloads(intArrayOf())
         return buildList {
             try {
-                while (cursor.moveToNext()) add(cursor.download)
+                while (cursor.moveToNext()) {
+                    val download = cursor.download
+                    val metadata = metadata(download)
+                    add(
+                        LeoDownloadItem(
+                            id = download.request.id,
+                            title = metadata.title,
+                            state = download.state,
+                            percent = download.percentDownloaded,
+                            bytesDownloaded = download.bytesDownloaded,
+                            contentLength = download.contentLength,
+                            url = download.request.uri.toString()
+                        )
+                    )
+                }
             } finally {
                 cursor.close()
             }
-        }
+        }.sortedWith(compareBy({ it.state == Download.STATE_COMPLETED }, { it.title.lowercase() }))
     }
 
     fun metadata(download: Download): LeoDownloadMetadata {
