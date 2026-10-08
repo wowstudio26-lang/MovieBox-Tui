@@ -1,6 +1,6 @@
-use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::jstring;
+use jni::JNIEnv;
 
 use crate::providers::models::ProviderKind;
 use crate::service::MovieBoxService;
@@ -103,7 +103,6 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativeSearch(
         .unwrap_or(std::ptr::null_mut())
 }
 
-
 #[derive(serde::Serialize)]
 struct AndroidDetailsResponse {
     ok: bool,
@@ -120,22 +119,43 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativeDetails
     let subject_id: String = match env.get_string(&subject_id) {
         Ok(value) => value.into(),
         Err(error) => {
-            return env.new_string(json_response(AndroidDetailsResponse {
-                ok: false, details: None, error: Some(format!("invalid subject id: {error}"))
-            })).map(|v| v.into_raw()).unwrap_or(std::ptr::null_mut());
+            return env
+                .new_string(json_response(AndroidDetailsResponse {
+                    ok: false,
+                    details: None,
+                    error: Some(format!("invalid subject id: {error}")),
+                }))
+                .map(|value| value.into_raw())
+                .unwrap_or(std::ptr::null_mut());
         }
     };
 
-    let response = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let response = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(runtime) => runtime.block_on(async move {
             let service = MovieBoxService::new();
-            match service.details_typed(ProviderKind::MovieBox, subject_id.trim()).await {
-                Ok(details) => AndroidDetailsResponse { ok: true, details: Some(details), error: None },
-                Err(error) => AndroidDetailsResponse { ok: false, details: None, error: Some(error.to_string()) },
+            match service
+                .details_typed(ProviderKind::MovieBox, subject_id.trim())
+                .await
+            {
+                Ok(details) => AndroidDetailsResponse {
+                    ok: true,
+                    details: Some(details),
+                    error: None,
+                },
+                Err(error) => AndroidDetailsResponse {
+                    ok: false,
+                    details: None,
+                    error: Some(error.to_string()),
+                },
             }
         }),
         Err(error) => AndroidDetailsResponse {
-            ok: false, details: None, error: Some(format!("Rust runtime error: {error}"))
+            ok: false,
+            details: None,
+            error: Some(format!("Rust runtime error: {error}")),
         },
     };
 
@@ -148,6 +168,7 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativeDetails
 struct AndroidPlaybackResponse {
     ok: bool,
     url: Option<String>,
+    headers: Vec<(String, String)>,
     error: Option<String>,
 }
 
@@ -160,33 +181,65 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativePlaybac
     let subject_id: String = match env.get_string(&subject_id) {
         Ok(value) => value.into(),
         Err(error) => {
-            return env.new_string(json_response(AndroidPlaybackResponse {
-                ok: false, url: None, error: Some(format!("invalid subject id: {error}"))
-            })).map(|v| v.into_raw()).unwrap_or(std::ptr::null_mut());
+            return env
+                .new_string(json_response(AndroidPlaybackResponse {
+                    ok: false,
+                    url: None,
+                    headers: Vec::new(),
+                    error: Some(format!("invalid subject id: {error}")),
+                }))
+                .map(|value| value.into_raw())
+                .unwrap_or(std::ptr::null_mut());
         }
     };
 
-    let response = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let response = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(runtime) => runtime.block_on(async move {
             use crate::providers::ReleaseProvider;
+
             let service = MovieBoxService::new();
-            match service.client.episode_streams(subject_id.trim(), 0, 0).await {
+            match service
+                .client
+                .episode_streams(subject_id.trim(), 0, 0)
+                .await
+            {
                 Ok(releases) => {
-                    let url = releases.into_iter().find_map(|release| {
-                        release.mirrors.first().map(|mirror| mirror.resolver_url.clone())
-                    });
-                    match url {
-                        Some(url) => AndroidPlaybackResponse { ok: true, url: Some(url), error: None },
+                    let source = releases
+                        .into_iter()
+                        .filter_map(|release| release.mirrors.into_iter().next())
+                        .next();
+
+                    match source {
+                        Some(mirror) => AndroidPlaybackResponse {
+                            ok: true,
+                            url: Some(mirror.resolver_url),
+                            headers: mirror.headers,
+                            error: None,
+                        },
                         None => AndroidPlaybackResponse {
-                            ok: false, url: None, error: Some("No playable stream URL found".to_string())
+                            ok: false,
+                            url: None,
+                            headers: Vec::new(),
+                            error: Some("No playable stream URL found".to_string()),
                         },
                     }
                 }
-                Err(error) => AndroidPlaybackResponse { ok: false, url: None, error: Some(error.to_string()) },
+                Err(error) => AndroidPlaybackResponse {
+                    ok: false,
+                    url: None,
+                    headers: Vec::new(),
+                    error: Some(error.to_string()),
+                },
             }
         }),
         Err(error) => AndroidPlaybackResponse {
-            ok: false, url: None, error: Some(format!("Rust runtime error: {error}"))
+            ok: false,
+            url: None,
+            headers: Vec::new(),
+            error: Some(format!("Rust runtime error: {error}")),
         },
     };
 
