@@ -393,6 +393,7 @@ private fun DownloadLibraryCard(item: LeoDownloadItem) {
                     Download.STATE_COMPLETED -> "Completed • Offline ready"
                     Download.STATE_DOWNLOADING -> "Downloading • $percent"
                     Download.STATE_QUEUED -> "Queued • $percent"
+                    Download.STATE_STOPPED -> "Paused • $percent"
                     Download.STATE_FAILED -> "Failed"
                     Download.STATE_REMOVING -> "Removing…"
                     else -> percent
@@ -416,11 +417,15 @@ private fun DownloadLibraryCard(item: LeoDownloadItem) {
                         Text("Play Offline")
                     }
                 } else if (item.state == Download.STATE_DOWNLOADING || item.state == Download.STATE_QUEUED) {
-                    OutlinedButton(onClick = { DownloadManagerHolder.pauseDownloads(context) }) {
+                    OutlinedButton(onClick = { DownloadManagerHolder.pauseDownload(context, item.id) }) {
                         Text("Pause")
                     }
+                } else if (item.state == Download.STATE_STOPPED) {
+                    OutlinedButton(onClick = { DownloadManagerHolder.resumeDownload(context, item.id) }) {
+                        Text("Resume")
+                    }
                 } else if (item.state == Download.STATE_FAILED) {
-                    OutlinedButton(onClick = { DownloadManagerHolder.resumeDownloads(context) }) {
+                    OutlinedButton(onClick = { DownloadManagerHolder.retryDownload(context, item.id) }) {
                         Text("Retry")
                     }
                 }
