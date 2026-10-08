@@ -26,7 +26,7 @@ android {
         applicationId = "com.wowstudio26.movieboxleo"
         minSdk = 26
         targetSdk = 36
-    ndkVersion = "29.0.14206865"
+        ndkVersion = "29.0.14206865"
         versionCode = 1
         versionName = "0.1.0"
     }
@@ -55,6 +55,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.navigation:navigation-compose:2.9.5")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-database:1.11.1")
+    implementation("androidx.media3:media3-datasource:1.11.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.11.1")
     implementation("androidx.media3:media3-ui:1.11.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
