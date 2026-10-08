@@ -50,7 +50,7 @@ object RustBridge {
         try {
             System.loadLibrary("moviebox_tui")
         } catch (error: Throwable) {
-            loadError = "Native Rust engine is not available: \${error.message ?: "unknown error"}"
+            loadError = "Native Rust engine is not available: ${error.message ?: "unknown error"}"
         }
     }
 
