@@ -6,6 +6,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.content.pm.ActivityInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -29,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.media3.common.MediaItem
@@ -37,6 +40,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -190,6 +196,8 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var playing by remember { mutableStateOf(false) }
     var playbackInfo by remember { mutableStateOf<PlaybackInfo?>(null) }
+    var selectedLanguageId by remember(result.id) { mutableStateOf(result.id) }
+    var selectedResolution by remember(result.id) { mutableIntStateOf(0) }
     var selectedSeason by remember(result.id) { mutableIntStateOf(0) }
     var selectedEpisode by remember(result.id) { mutableIntStateOf(0) }
     var seasonMenuOpen by remember { mutableStateOf(false) }
@@ -241,6 +249,29 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                     if (item.director.isNotBlank()) Text("Director: " + item.director, Modifier.padding(top = 12.dp))
                     if (item.stars.isNotBlank()) Text("Cast: " + item.stars, Modifier.padding(top = 6.dp))
 
+                    LaunchedEffect(item.dubs) {
+                        if (item.dubs.isNotEmpty() && item.dubs.none { it.subjectId == selectedLanguageId }) selectedLanguageId = item.dubs.first().subjectId
+                    }
+                    if (item.dubs.size > 1) {
+                        Spacer(Modifier.height(16.dp))
+                        Text("Language / Audio", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        var languageMenuOpen by remember { mutableStateOf(false) }
+                        Box(Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = { languageMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                                val selected = item.dubs.firstOrNull { it.subjectId == selectedLanguageId }
+                                Text(selected?.label ?: selected?.language ?: "Original")
+                            }
+                            DropdownMenu(expanded = languageMenuOpen, onDismissRequest = { languageMenuOpen = false }) {
+                                item.dubs.forEach { dub ->
+                                    DropdownMenuItem(
+                                        text = { Text(dub.label.ifBlank { dub.language.ifBlank { "Original" } }) },
+                                        onClick = { selectedLanguageId = dub.subjectId; selectedResolution = 0; playbackInfo = null; languageMenuOpen = false }
+                                    )
+                                }
+                            }
+                        }
+                    }
                     if (item.seasons.isNotEmpty()) {
                         val seasonInfo = item.seasons.find { it.number == selectedSeason }
                             ?: item.seasons.first()
@@ -319,34 +350,25 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
 
                     Spacer(Modifier.height(20.dp))
                     if (playbackInfo == null) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Button(
                                 onClick = {
                                     if (playing || downloadBusy) return@Button
                                     playing = true
                                     error = null
                                     scope.launch {
-                                        val playback =
-                                            withContext(Dispatchers.IO) { RustBridge.playback(result.id, selectedSeason, selectedEpisode) }
-                                        playback.onSuccess { info ->
-                                            playbackInfo = info
-                                        }.onFailure {
-                                            error = it.message ?: "Unable to resolve stream"
-                                        }
+                                        val playback = withContext(Dispatchers.IO) { RustBridge.playback(selectedLanguageId, selectedSeason, selectedEpisode) }
+                                        playback.onSuccess { info -> playbackInfo = info; selectedResolution = info.defaultOption.resolution }
+                                            .onFailure { error = it.message ?: "Unable to resolve stream" }
                                         playing = false
                                     }
                                 },
-                                enabled = !downloadBusy,
-                                modifier = Modifier.weight(1f)
+                                enabled = !downloadBusy, modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Default.PlayArrow, null)
                                 Spacer(Modifier.width(6.dp))
                                 Text(if (playing) "Resolving…" else "Play")
                             }
-
                             OutlinedButton(
                                 onClick = {
                                     if (playing || downloadBusy) return@OutlinedButton
@@ -354,56 +376,34 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                                     error = null
                                     downloadMessage = null
                                     scope.launch {
-                                        val playback =
-                                            withContext(Dispatchers.IO) { RustBridge.playback(result.id, selectedSeason, selectedEpisode) }
+                                        val playback = withContext(Dispatchers.IO) { RustBridge.playback(selectedLanguageId, selectedSeason, selectedEpisode) }
                                         playback.onSuccess { info ->
-                                            if (Build.VERSION.SDK_INT >= 33 &&
-                                                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                                            ) {
-                                                (context as? MainActivity)?.requestPermissions(
-                                                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                                                    4102
-                                                )
+                                            val option = info.options.firstOrNull { it.resolution == selectedResolution } ?: info.defaultOption
+                                            if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                                                (context as? MainActivity)?.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4102)
                                             }
-                                            DownloadManagerHolder.addDownload(
-                                                context = context,
-                                                id = "moviebox:" + result.id + ":s" + selectedSeason + "e" + selectedEpisode,
-                                                url = info.url,
-                                                title = if (item.seasons.isNotEmpty()) item.title + " • S" + selectedSeason.toString().padStart(2, '0') + "E" + selectedEpisode.toString().padStart(2, '0') else item.title,
-                                                posterUrl = item.posterUrl,
-                                                headers = info.headers
-                                            )
-                                            downloadMessage = "Added to Downloads"
-                                        }.onFailure {
-                                            error = it.message ?: "Unable to prepare download"
-                                        }
+                                            val downloadId = "moviebox:" + selectedLanguageId + ":s" + selectedSeason + "e" + selectedEpisode + ":r" + option.resolution
+                                            val title = if (item.seasons.isNotEmpty()) {
+                                                item.title + " • S" + selectedSeason.toString().padStart(2, '0') + "E" + selectedEpisode.toString().padStart(2, '0') + " • " + option.quality
+                                            } else {
+                                                item.title + " • " + option.quality
+                                            }
+                                            DownloadManagerHolder.addDownload(context, downloadId, option.url, title, item.posterUrl, option.headers)
+                                            downloadMessage = "Added to Downloads • " + option.quality
+                                        }.onFailure { error = it.message ?: "Unable to prepare download" }
                                         downloadBusy = false
                                     }
                                 },
-                                enabled = !playing,
-                                modifier = Modifier.weight(1f)
+                                enabled = !playing, modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Default.Download, null)
                                 Spacer(Modifier.width(6.dp))
                                 Text(if (downloadBusy) "Preparing…" else "Download")
                             }
                         }
-                        downloadMessage?.let {
-                            Text(
-                                it,
-                                Modifier.padding(top = 8.dp),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        downloadMessage?.let { Text(it, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.primary) }
                     } else {
-                        PlaybackPlayer(playbackInfo!!)
-                        Spacer(Modifier.height(10.dp))
-                        OutlinedButton(
-                            onClick = { playbackInfo = null },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Close Player")
-                        }
+                        PlaybackPlayer(playbackInfo!!, selectedResolution, { selectedResolution = it }) { playbackInfo = null }
                     }
                     Spacer(Modifier.height(30.dp))
                 }
@@ -572,35 +572,71 @@ private fun SettingsScreen() {
 
 
 @Composable
-private fun PlaybackPlayer(info: PlaybackInfo) {
+private fun PlaybackPlayer(
+    playbackInfo: PlaybackInfo,
+    selectedResolution: Int,
+    onResolutionChange: (Int) -> Unit,
+    onClose: () -> Unit
+) {
     val context = LocalContext.current
-    val player = remember(info.url, info.headers) {
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(info.headers)
-        ExoPlayer.Builder(context)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
-            .build()
-            .apply {
-                setMediaItem(MediaItem.fromUri(info.url))
-                prepare()
-                playWhenReady = true
-            }
+    val activity = context as? MainActivity
+    var player by remember { mutableStateOf<ExoPlayer?>(null) }
+    var resolutionMenuOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(playbackInfo, selectedResolution) {
+        val option = playbackInfo.options.firstOrNull { it.resolution == selectedResolution } ?: playbackInfo.defaultOption
+        player?.release()
+        val dataSourceFactory = DefaultHttpDataSource.Factory().setDefaultRequestProperties(option.headers)
+        player = ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory)).build().apply {
+            setMediaItem(MediaItem.fromUri(option.url))
+            prepare()
+            playWhenReady = true
+        }
     }
 
-    DisposableEffect(player) {
-        onDispose { player.release() }
+    DisposableEffect(Unit) {
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        activity?.window?.let { window ->
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            WindowInsetsControllerCompat(window, window.decorView).apply {
+                hide(WindowInsetsCompat.Type.systemBars())
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
+        onDispose {
+            player?.release()
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            activity?.window?.let { window ->
+                WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+            }
+        }
     }
 
-    AndroidView(
-        factory = { viewContext ->
-            PlayerView(viewContext).apply {
-                this.player = player
-                useController = true
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnBackPress = true, dismissOnClickOutside = false)
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            AndroidView(
+                factory = { viewContext -> PlayerView(viewContext).apply { useController = true; controllerAutoShow = true } },
+                update = { it.player = player },
+                modifier = Modifier.fillMaxSize()
+            )
+            Row(Modifier.align(Alignment.TopEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box {
+                    FilledTonalButton(onClick = { resolutionMenuOpen = true }) {
+                        Text(playbackInfo.options.firstOrNull { it.resolution == selectedResolution }?.quality ?: playbackInfo.defaultOption.quality)
+                    }
+                    DropdownMenu(expanded = resolutionMenuOpen, onDismissRequest = { resolutionMenuOpen = false }) {
+                        playbackInfo.options.distinctBy { it.resolution }.sortedByDescending { it.resolution }.forEach { option ->
+                            DropdownMenuItem(text = { Text(option.quality) }, onClick = { onResolutionChange(option.resolution); resolutionMenuOpen = false })
+                        }
+                    }
+                }
+                FilledTonalButton(onClick = onClose) { Text("Exit Fullscreen") }
             }
-        },
-        update = { it.player = player },
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(230.dp)
-    )
+        }
+    }
 }
+
