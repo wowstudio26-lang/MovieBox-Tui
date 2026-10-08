@@ -22,6 +22,8 @@ data class SeasonInfo(
     val episodes: List<EpisodeInfo>
 )
 
+data class AudioTrackInfo(val subjectId: String, val language: String, val label: String)
+
 data class MediaDetails(
     val id: String,
     val title: String,
@@ -35,13 +37,20 @@ data class MediaDetails(
     val posterUrl: String?,
     val duration: String,
     val genres: List<String>,
-    val seasons: List<SeasonInfo>
+    val seasons: List<SeasonInfo>,
+    val dubs: List<AudioTrackInfo>
 )
 
-data class PlaybackInfo(
+data class PlaybackOption(
+    val quality: String,
+    val resolution: Int,
     val url: String,
     val headers: Map<String, String>
 )
+
+data class PlaybackInfo(val options: List<PlaybackOption>) {
+    val defaultOption: PlaybackOption get() = options.first()
+}
 
 object RustBridge {
     private var loadError: String? = null
@@ -139,6 +148,19 @@ object RustBridge {
                             add(SeasonInfo(seasonNumber, episodes))
                         }
                     }
+                },
+                dubs = buildList {
+                    val dubs = item.optJSONArray("dubs")
+                    if (dubs != null) {
+                        for (i in 0 until dubs.length()) {
+                            val dub = dubs.optJSONObject(i) ?: continue
+                            val subjectId = dub.optString("subject_id")
+                            if (subjectId.isBlank()) continue
+                            val language = dub.optString("language")
+                            val label = dub.optString("label").ifBlank { language.ifBlank { "Original" } }
+                            add(AudioTrackInfo(subjectId, language, label))
+                        }
+                    }
                 }
             )
         }
@@ -146,31 +168,26 @@ object RustBridge {
 
     fun playback(id: String, season: Int = 0, episode: Int = 0): Result<PlaybackInfo> {
         loadError?.let { return Result.failure(IllegalStateException(it)) }
-
         return runCatching {
             val root = JSONObject(nativePlayback(id, season, episode))
-            if (!root.optBoolean("ok", false)) {
-                throw IllegalStateException(
-                    root.optString("error", "No playable stream found")
-                )
-            }
-
-            val url = root.optString("url").takeIf { it.isNotBlank() }
-                ?: throw IllegalStateException("No playable stream URL found")
-
-            val headers = buildMap {
-                val array = root.optJSONArray("headers")
-                if (array != null) {
-                    for (i in 0 until array.length()) {
-                        val pair = array.getJSONArray(i)
-                        if (pair.length() >= 2) {
-                            put(pair.optString(0), pair.optString(1))
+            if (!root.optBoolean("ok", false)) throw IllegalStateException(root.optString("error", "No playable stream found"))
+            val options = buildList {
+                val array = root.optJSONArray("options")
+                if (array != null) for (i in 0 until array.length()) {
+                    val item = array.optJSONObject(i) ?: continue
+                    val url = item.optString("url").takeIf { it.isNotBlank() } ?: continue
+                    val headers = buildMap {
+                        val ha = item.optJSONArray("headers")
+                        if (ha != null) for (h in 0 until ha.length()) {
+                            val pair = ha.optJSONArray(h) ?: continue
+                            if (pair.length() >= 2) put(pair.optString(0), pair.optString(1))
                         }
                     }
+                    add(PlaybackOption(item.optString("quality").ifBlank { "Auto" }, item.optInt("resolution", 0), url, headers))
                 }
             }
-
-            PlaybackInfo(url, headers)
+            if (options.isEmpty()) throw IllegalStateException("No playable stream options found")
+            PlaybackInfo(options)
         }
     }
 
