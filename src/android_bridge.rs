@@ -222,8 +222,8 @@ pub extern "system" fn Java_com_wowstudio26_movieboxleo_RustBridge_nativePlaybac
                     let options = releases
                         .into_iter()
                         .filter_map(|release| {
-                            let mirror = release.mirrors.into_iter().next()?;
                             let resolution = release.resolution_u64();
+                            let mirror = release.mirrors.into_iter().next()?;
                             Some(AndroidPlaybackOption {
                                 quality: release.quality.unwrap_or_else(|| format!("{resolution}p")),
                                 resolution,
