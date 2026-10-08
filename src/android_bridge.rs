@@ -1,6 +1,6 @@
+use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::jstring;
-use jni::JNIEnv;
 
 use crate::providers::models::ProviderKind;
 use crate::service::MovieBoxService;
