@@ -1,8 +1,8 @@
 <div align="center">
 
-# MovieBox-TUI
+# MovieBox Leo
 
-**Terminal interface to find, download, and stream movies, TV shows, and live TV using local media players.**
+**MovieBox Leo — terminal interface to find, download, and stream movies, TV shows, and live TV using local media players.**
 
 [ English ](README.md) • [ বাংলা ](README_BN.md) • [ हिन्दी ](README_HI.md) • [ Español ](README_ES.md)
 
@@ -162,4 +162,4 @@ Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
 
 ## Disclaimer
 
-MovieBox-TUI does not host or store media. It plays publicly available streams. Users must comply with local laws.
+MovieBox Leo does not host or store media. It plays publicly available streams. Users must comply with local laws.
