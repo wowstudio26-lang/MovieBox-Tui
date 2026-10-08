@@ -139,6 +139,16 @@ object DownloadManagerHolder {
         )
     }
 
+    fun retryDownload(context: Context, id: String) {
+        val existing = runCatching { index(context).getDownload(id) }.getOrNull() ?: return
+        androidx.media3.exoplayer.offline.DownloadService.sendAddDownload(
+            context,
+            MovieBoxLeoDownloadService::class.java,
+            existing.request,
+            false
+        )
+    }
+
     fun pauseDownloads(context: Context) {
         androidx.media3.exoplayer.offline.DownloadService.sendPauseDownloads(
             context,
@@ -185,10 +195,9 @@ object DownloadManagerHolder {
     }
 
     fun cachedPlaybackDataSourceFactory(context: Context): CacheDataSource.Factory {
-        val upstream = DefaultHttpDataSource.Factory()
         return CacheDataSource.Factory()
             .setCache(cache(context))
-            .setUpstreamDataSourceFactory(upstream)
+            .setUpstreamDataSourceFactory(null)
             .setCacheWriteDataSinkFactory(null)
     }
 
