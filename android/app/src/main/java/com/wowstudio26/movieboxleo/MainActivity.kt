@@ -190,6 +190,10 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var playing by remember { mutableStateOf(false) }
     var playbackInfo by remember { mutableStateOf<PlaybackInfo?>(null) }
+    var selectedSeason by remember(result.id) { mutableIntStateOf(0) }
+    var selectedEpisode by remember(result.id) { mutableIntStateOf(0) }
+    var seasonMenuOpen by remember { mutableStateOf(false) }
+    var episodeMenuOpen by remember { mutableStateOf(false) }
     var downloadBusy by remember { mutableStateOf(false) }
     var downloadMessage by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -237,6 +241,82 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                     if (item.director.isNotBlank()) Text("Director: " + item.director, Modifier.padding(top = 12.dp))
                     if (item.stars.isNotBlank()) Text("Cast: " + item.stars, Modifier.padding(top = 6.dp))
 
+                    if (item.seasons.isNotEmpty()) {
+                        val seasonInfo = item.seasons.find { it.number == selectedSeason }
+                            ?: item.seasons.first()
+                        LaunchedEffect(item.id, item.seasons) {
+                            selectedSeason = item.seasons.first().number
+                            selectedEpisode = item.seasons.first().episodes.firstOrNull()?.number ?: 1
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Text("Episodes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(Modifier.weight(1f)) {
+                                OutlinedButton(
+                                    onClick = { seasonMenuOpen = true },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Season " + selectedSeason)
+                                }
+                                DropdownMenu(
+                                    expanded = seasonMenuOpen,
+                                    onDismissRequest = { seasonMenuOpen = false }
+                                ) {
+                                    item.seasons.forEach { season ->
+                                        DropdownMenuItem(
+                                            text = { Text("Season " + season.number) },
+                                            onClick = {
+                                                selectedSeason = season.number
+                                                selectedEpisode = season.episodes.firstOrNull()?.number ?: 1
+                                                seasonMenuOpen = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Box(Modifier.weight(1f)) {
+                                OutlinedButton(
+                                    onClick = { episodeMenuOpen = true },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Episode " + selectedEpisode)
+                                }
+                                DropdownMenu(
+                                    expanded = episodeMenuOpen,
+                                    onDismissRequest = { episodeMenuOpen = false }
+                                ) {
+                                    seasonInfo.episodes.forEach { episode ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    "EP " + episode.number +
+                                                        if (episode.title.isNotBlank()) " • " + episode.title else ""
+                                                )
+                                            },
+                                            onClick = {
+                                                selectedEpisode = episode.number
+                                                episodeMenuOpen = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        seasonInfo.episodes.find { it.number == selectedEpisode }?.title?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                it,
+                                Modifier.padding(top = 6.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
                     Spacer(Modifier.height(20.dp))
                     if (playbackInfo == null) {
                         Row(
@@ -250,7 +330,7 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                                     error = null
                                     scope.launch {
                                         val playback =
-                                            withContext(Dispatchers.IO) { RustBridge.playback(result.id) }
+                                            withContext(Dispatchers.IO) { RustBridge.playback(result.id, selectedSeason, selectedEpisode) }
                                         playback.onSuccess { info ->
                                             playbackInfo = info
                                         }.onFailure {
@@ -287,9 +367,9 @@ private fun DetailsScreen(result: SearchResult, onBack: () -> Unit) {
                                             }
                                             DownloadManagerHolder.addDownload(
                                                 context = context,
-                                                id = "moviebox:${result.id}",
+                                                id = "moviebox:" + result.id + ":s" + selectedSeason + "e" + selectedEpisode,
                                                 url = info.url,
-                                                title = item.title,
+                                                title = if (item.seasons.isNotEmpty()) item.title + " • S" + selectedSeason.toString().padStart(2, '0') + "E" + selectedEpisode.toString().padStart(2, '0') else item.title,
                                                 posterUrl = item.posterUrl,
                                                 headers = info.headers
                                             )
