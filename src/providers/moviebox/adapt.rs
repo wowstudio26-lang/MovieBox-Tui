@@ -426,40 +426,67 @@ pub fn moviebox_details_json_to_media_details(
     }
 
     let mut dubs = Vec::new();
-    if let Some(dubs_arr) = subject.get("dubs").and_then(|d| d.as_array()) {
-        for d in dubs_arr {
-            let subject_id = d
-                .get("subjectId")
-                .or_else(|| d.get("id"))
-                .and_then(|v| {
-                    if let Some(num) = v.as_i64() {
-                        Some(num.to_string())
-                    } else {
-                        v.as_str().map(|str_val| str_val.to_string())
-                    }
-                })
-                .unwrap_or_default();
-            let language = d
-                .get("lanName")
-                .or_else(|| d.get("language"))
-                .or_else(|| d.get("lang"))
-                .and_then(|l| l.as_str())
-                .unwrap_or("Unknown")
-                .to_string();
-            let label = d
-                .get("title")
-                .or_else(|| d.get("name"))
-                .or_else(|| d.get("lanName"))
-                .and_then(|l| l.as_str())
-                .unwrap_or(&language)
-                .to_string();
-            dubs.push(AudioTrackOption {
-                subject_id,
-                language,
-                label,
-            });
+    let mut dub_values: Vec<&serde_json::Value> = Vec::new();
+
+    for key in ["dubs", "dubbed", "audioTracks", "audio_tracks"] {
+        if let Some(value) = subject.get(key) {
+            if let Some(array) = value.as_array() {
+                dub_values.extend(array.iter());
+            } else if let Some(array) = value.get("list").and_then(|v| v.as_array()) {
+                dub_values.extend(array.iter());
+            } else if let Some(array) = value.get("items").and_then(|v| v.as_array()) {
+                dub_values.extend(array.iter());
+            }
         }
     }
+
+    for d in dub_values {
+        let subject_id = d
+            .get("subjectId")
+            .or_else(|| d.get("subject_id"))
+            .or_else(|| d.get("id"))
+            .and_then(|v| {
+                if let Some(num) = v.as_i64() {
+                    Some(num.to_string())
+                } else if let Some(num) = v.as_u64() {
+                    Some(num.to_string())
+                } else {
+                    v.as_str().map(|str_val| str_val.to_string())
+                }
+            })
+            .unwrap_or_default();
+
+        if subject_id.is_empty() {
+            continue;
+        }
+
+        let language = d
+            .get("lanName")
+            .or_else(|| d.get("language"))
+            .or_else(|| d.get("lang"))
+            .or_else(|| d.get("locale"))
+            .and_then(|l| l.as_str())
+            .unwrap_or("Unknown")
+            .to_string();
+
+        let label = d
+            .get("title")
+            .or_else(|| d.get("name"))
+            .or_else(|| d.get("lanName"))
+            .or_else(|| d.get("language"))
+            .and_then(|l| l.as_str())
+            .unwrap_or(&language)
+            .to_string();
+
+        dubs.push(AudioTrackOption {
+            subject_id,
+            language,
+            label,
+        });
+    }
+
+    dubs.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
+    dubs.dedup_by(|a, b| a.subject_id == b.subject_id);
 
     Ok(MediaDetails {
         id: ProviderMediaId {
