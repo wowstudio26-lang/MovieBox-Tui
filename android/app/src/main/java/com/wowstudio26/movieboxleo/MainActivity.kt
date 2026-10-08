@@ -36,6 +36,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -95,8 +97,15 @@ private fun MovieBoxLeoApp() {
         Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
-                    0 -> HomeScreen(query, { query = it })
-                    1 -> SearchScreen(query, { query = it })
+                    0 -> HomeScreen(
+                        query = query,
+                        onQueryChange = { query = it },
+                        onSearch = { selectedTab = 1 }
+                    )
+                    1 -> SearchScreen(
+                        query = query,
+                        onQueryChange = { query = it }
+                    )
                     2 -> LibraryScreen()
                     else -> SettingsScreen()
                 }
@@ -133,7 +142,11 @@ private fun MovieBoxLeoApp() {
 }
 
 @Composable
-private fun HomeScreen(query: String, onQueryChange: (String) -> Unit) {
+private fun HomeScreen(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -150,24 +163,58 @@ private fun HomeScreen(query: String, onQueryChange: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, null) },
-            placeholder = { Text("Search movies, series, anime…") }
+            placeholder = { Text("Search movies, series, anime…") },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                imeAction = androidx.compose.ui.text.input.ImeAction.Search
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                onSearch = { onSearch() }
+            )
         )
 
         Spacer(Modifier.height(24.dp))
-        demoRows.forEach { (title, items) ->
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(10.dp))
-            MediaRow(items)
-            Spacer(Modifier.height(22.dp))
-        })
+        Text(
+            "Your Android client is now connected to the Rust engine.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(18.dp))
+        Text("Next", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(10.dp))
+        Text("Search a title to query the existing MovieBox provider through Rust.")
     }
 }
 
 @Composable
 private fun SearchScreen(query: String, onQueryChange: (String) -> Unit) {
+    var results by remember { mutableStateOf<List<SearchResult>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun performSearch() {
+        val cleanQuery = query.trim()
+        if (cleanQuery.isEmpty() || searching) return
+
+        searching = true
+        error = null
+        scope.launch {
+            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                RustBridge.search(cleanQuery)
+            }
+            result.onSuccess {
+                results = it
+            }.onFailure {
+                results = emptyList()
+                error = it.message ?: "Search failed"
+            }
+            searching = false
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(18.dp)
     ) {
         Text("Search", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -178,48 +225,91 @@ private fun SearchScreen(query: String, onQueryChange: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, null) },
-            placeholder = { Text("Search…") }
+            placeholder = { Text("Search…") },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                imeAction = androidx.compose.ui.text.input.ImeAction.Search
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                onSearch = { performSearch() }
+            )
         )
-        Spacer(Modifier.height(24.dp))
-        Text(
-            if (query.isBlank()) "Start typing to search the available providers."
-            else "Provider search will be connected to the Rust core in the next integration stage.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+
+        Spacer(Modifier.height(12.dp))
+        androidx.compose.material3.Button(
+            onClick = { performSearch() },
+            enabled = query.isNotBlank() && !searching,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (searching) "Searching…" else "Search")
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        when {
+            error != null -> Text(
+                error!!,
+                color = MaterialTheme.colorScheme.error
+            )
+            searching -> Text(
+                "Searching MovieBox provider…",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            results.isEmpty() && query.isNotBlank() -> Text(
+                "No results found.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            results.isEmpty() -> Text(
+                "Enter a title and search.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            else -> {
+                results.forEach { result ->
+                    SearchResultCard(result)
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun MediaRow(items: List<MediaItem>) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(end = 18.dp)
+private fun SearchResultCard(result: SearchResult) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        items(items) { item ->
-            Card(
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
                 modifier = Modifier
-                    .height(150.dp)
-                    .clickable { },
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    .height(92.dp)
+                    .fillMaxWidth(0.26f)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Color(0xFF252530), Color(0xFF15151A))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
             ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(90.dp)
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(Color(0xFF252530), Color(0xFF15151A))
-                                )
-                            )
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(item.title, fontWeight = FontWeight.SemiBold)
-                    Text(item.meta, style = MaterialTheme.typography.bodySmall)
+                Text("POSTER", style = MaterialTheme.typography.labelSmall)
+            }
+            Spacer(Modifier.height(1.dp))
+            Column(
+                modifier = Modifier.padding(start = 14.dp)
+            ) {
+                Text(result.title, fontWeight = FontWeight.SemiBold)
+                if (result.year.isNotBlank()) {
+                    Text(result.year, style = MaterialTheme.typography.bodySmall)
                 }
+                Text(
+                    result.mediaType,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
@@ -248,8 +338,8 @@ private fun SettingsScreen() {
         Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
         Text("MovieBox Leo Android", fontWeight = FontWeight.SemiBold)
-        Text("Android client foundation • v0.1.0")
+        Text("Android client • Rust engine bridge • v0.1.0")
         Spacer(Modifier.height(18.dp))
-        Text("The existing Rust engine remains the source of truth for providers, downloads, history, favorites, subtitles and playback resolution.")
+        Text("The Rust engine remains the source of truth for providers, downloads, history, favorites, subtitles and playback resolution.")
     }
 }
