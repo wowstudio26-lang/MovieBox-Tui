@@ -54,6 +54,7 @@ impl Default for Config {
 }
 
 pub const APP_NAME: &str = "moviebox-tui";
+pub const APP_DISPLAY_NAME: &str = "MovieBox Leo";
 
 static TEST_SANDBOX_DIR: std::sync::LazyLock<Option<PathBuf>> = std::sync::LazyLock::new(|| {
     let is_test_binary = cfg!(test)
