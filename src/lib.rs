@@ -12,3 +12,6 @@ pub mod proxy;
 pub mod service;
 pub mod tui;
 pub mod updater;
+
+#[cfg(target_os = "android")]
+pub mod android_bridge;
