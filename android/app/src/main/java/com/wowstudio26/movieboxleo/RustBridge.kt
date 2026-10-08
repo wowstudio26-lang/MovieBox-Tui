@@ -11,6 +11,17 @@ data class SearchResult(
     val provider: String
 )
 
+data class EpisodeInfo(
+    val season: Int,
+    val number: Int,
+    val title: String
+)
+
+data class SeasonInfo(
+    val number: Int,
+    val episodes: List<EpisodeInfo>
+)
+
 data class MediaDetails(
     val id: String,
     val title: String,
@@ -23,7 +34,8 @@ data class MediaDetails(
     val stars: String,
     val posterUrl: String?,
     val duration: String,
-    val genres: List<String>
+    val genres: List<String>,
+    val seasons: List<SeasonInfo>
 )
 
 data class PlaybackInfo(
@@ -102,16 +114,41 @@ object RustBridge {
                             add(genres.optString(i))
                         }
                     }
+                },
+                seasons = buildList {
+                    val seasons = item.optJSONArray("seasons")
+                    if (seasons != null) {
+                        for (s in 0 until seasons.length()) {
+                            val seasonObject = seasons.optJSONObject(s) ?: continue
+                            val seasonNumber = seasonObject.optInt("number", 0)
+                            val episodes = buildList {
+                                val episodeArray = seasonObject.optJSONArray("episodes")
+                                if (episodeArray != null) {
+                                    for (e in 0 until episodeArray.length()) {
+                                        val episodeObject = episodeArray.optJSONObject(e) ?: continue
+                                        add(
+                                            EpisodeInfo(
+                                                season = episodeObject.optInt("season", seasonNumber),
+                                                number = episodeObject.optInt("number", e + 1),
+                                                title = episodeObject.optString("title")
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            add(SeasonInfo(seasonNumber, episodes))
+                        }
+                    }
                 }
             )
         }
     }
 
-    fun playback(id: String): Result<PlaybackInfo> {
+    fun playback(id: String, season: Int = 0, episode: Int = 0): Result<PlaybackInfo> {
         loadError?.let { return Result.failure(IllegalStateException(it)) }
 
         return runCatching {
-            val root = JSONObject(nativePlayback(id))
+            val root = JSONObject(nativePlayback(id, season, episode))
             if (!root.optBoolean("ok", false)) {
                 throw IllegalStateException(
                     root.optString("error", "No playable stream found")
@@ -139,5 +176,5 @@ object RustBridge {
 
     private external fun nativeSearch(query: String): String
     private external fun nativeDetails(id: String): String
-    private external fun nativePlayback(id: String): String
+    private external fun nativePlayback(id: String, season: Int, episode: Int): String
 }
