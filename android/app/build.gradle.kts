@@ -4,6 +4,20 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+tasks.register<Exec>("buildRustAndroid") {
+    workingDir(rootProject.projectDir.parentFile)
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-o", file("app/src/main/jniLibs"),
+        "build", "--release"
+    )
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("buildRustAndroid")
+}
+
 android {
     namespace = "com.wowstudio26.movieboxleo"
     compileSdk = 36
