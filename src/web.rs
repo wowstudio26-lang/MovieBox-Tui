@@ -28,6 +28,7 @@ const MAX_BODY_BYTES: usize = 1024 * 1024;
 struct AppState {
     service: MovieBoxService,
     jobs: Mutex<HashMap<String, DownloadJob>>,
+    slots: Arc<tokio::sync::Semaphore>,
     next_id: AtomicU64,
 }
 
@@ -99,6 +100,7 @@ pub async fn run() -> io::Result<()> {
     let state = Arc::new(AppState {
         service: MovieBoxService::new(),
         jobs: Mutex::new(HashMap::new()),
+        slots: Arc::new(tokio::sync::Semaphore::new(2)),
         next_id: AtomicU64::new(1),
     });
 
@@ -292,7 +294,7 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<AppState>) -> io::R
                 "pause" => {
                     let mut jobs = state.jobs.lock().unwrap_or_else(|error| error.into_inner());
                     match jobs.get_mut(id) {
-                        Some(job) if job.state == "downloading" => {
+                        Some(job) if job.state == "downloading" || job.state == "queued" => {
                             job.cancel.store(true, Ordering::Relaxed);
                             job.state = "pausing".to_string();
                             Ok(())
@@ -304,7 +306,7 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<AppState>) -> io::R
                 "cancel" => {
                     let mut jobs = state.jobs.lock().unwrap_or_else(|error| error.into_inner());
                     match jobs.get_mut(id) {
-                        Some(job) if job.state == "downloading" || job.state == "pausing" => {
+                        Some(job) if job.state == "downloading" || job.state == "queued" || job.state == "pausing" => {
                             job.remove_when_stopped = true;
                             job.cancel.store(true, Ordering::Relaxed);
                             job.state = "cancelling".to_string();
@@ -367,11 +369,33 @@ fn launch_download(state: Arc<AppState>, id: &str) -> Result<(), String> {
         let job = jobs.get_mut(id).ok_or_else(|| "Download not found.".to_string())?;
         job.cancel.store(false, Ordering::Relaxed);
         job.remove_when_stopped = false;
-        job.state = "downloading".to_string();
+        job.state = "queued".to_string();
         (job.url.clone(), job.path.clone(), job.headers.clone(), Arc::clone(&job.cancel))
     };
     let id = id.to_string();
+    let slots = Arc::clone(&state.slots);
     tokio::spawn(async move {
+        let permit = tokio::select! {
+            result = slots.acquire_owned() => match result {
+                Ok(permit) => permit,
+                Err(_) => {
+                    set_job_error(&state, &id, "Download queue is unavailable.".to_string());
+                    return;
+                }
+            },
+            _ = wait_for_cancel(Arc::clone(&cancel)) => {
+                finish_waiting_job(&state, &id, &path).await;
+                return;
+            }
+        };
+        if cancel.load(Ordering::Relaxed) {
+            drop(permit);
+            finish_waiting_job(&state, &id, &path).await;
+            return;
+        }
+        if let Some(job) = state.jobs.lock().unwrap_or_else(|error| error.into_inner()).get_mut(&id) {
+            job.state = "downloading".to_string();
+        }
         if let Some(parent) = path.parent() {
             if let Err(error) = tokio::fs::create_dir_all(parent).await {
                 set_job_error(&state, &id, format!("Cannot create destination folder: {error}"));
@@ -437,8 +461,37 @@ fn launch_download(state: Arc<AppState>, id: &str) -> Result<(), String> {
                 }
             }
         }
+        drop(permit);
     });
     Ok(())
+}
+
+async fn wait_for_cancel(cancel: Arc<AtomicBool>) {
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+async fn finish_waiting_job(state: &AppState, id: &str, path: &Path) {
+    let remove = {
+        let jobs = state.jobs.lock().unwrap_or_else(|error| error.into_inner());
+        jobs.get(id).is_some_and(|job| job.remove_when_stopped)
+    };
+    if remove {
+        let _ = tokio::fs::remove_file(path).await;
+        let _ = tokio::fs::remove_file(append_suffix(path, "part")).await;
+        let _ = tokio::fs::remove_file(append_suffix(path, "part.json")).await;
+    }
+    if let Some(job) = state.jobs.lock().unwrap_or_else(|error| error.into_inner()).get_mut(id) {
+        job.state = if remove { "cancelled" } else { "paused" }.to_string();
+        if remove {
+            job.downloaded = 0;
+            job.total = None;
+        }
+    }
 }
 
 fn set_job_error(state: &AppState, id: &str, message: String) {
