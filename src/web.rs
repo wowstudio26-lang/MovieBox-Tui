@@ -66,6 +66,11 @@ struct LibraryItem {
 }
 
 #[derive(Deserialize)]
+struct DeleteLibraryRequest {
+    path: String,
+}
+
+#[derive(Deserialize)]
 struct NewDownload {
     url: String,
     title: String,
@@ -222,6 +227,42 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<AppState>) -> io::R
         }
         items.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
         return json_response(&mut stream, 200, &serde_json::json!({"root": root.display().to_string(), "items": items})).await;
+    }
+    if request.method == "POST" && path == "/api/library/delete" {
+        let payload: DeleteLibraryRequest = match serde_json::from_slice(&request.body) {
+            Ok(payload) => payload,
+            Err(error) => return json_response(&mut stream, 400, &serde_json::json!({"error": format!("Invalid request: {error}")})).await,
+        };
+        let relative = Path::new(&payload.path);
+        if relative.is_absolute() || relative.components().any(|part| matches!(part, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
+            return json_response(&mut stream, 400, &serde_json::json!({"error": "Invalid library path."})).await;
+        }
+        let root = match download_root() {
+            Ok(root) => root,
+            Err(error) => return json_response(&mut stream, 400, &serde_json::json!({"error": error})).await,
+        };
+        let canonical_root = match tokio::fs::canonicalize(&root).await {
+            Ok(root) => root,
+            Err(error) => return json_response(&mut stream, 400, &serde_json::json!({"error": format!("Library folder is unavailable: {error}")})).await,
+        };
+        let target = match tokio::fs::canonicalize(root.join(relative)).await {
+            Ok(target) => target,
+            Err(error) => return json_response(&mut stream, 404, &serde_json::json!({"error": format!("File not found: {error}")})).await,
+        };
+        if !target.starts_with(&canonical_root) {
+            return json_response(&mut stream, 400, &serde_json::json!({"error": "Refusing to delete a file outside the library folder."})).await;
+        }
+        let metadata = match tokio::fs::metadata(&target).await {
+            Ok(metadata) => metadata,
+            Err(error) => return json_response(&mut stream, 404, &serde_json::json!({"error": error.to_string()})).await,
+        };
+        if !metadata.is_file() {
+            return json_response(&mut stream, 400, &serde_json::json!({"error": "Only files can be deleted from the library."})).await;
+        }
+        return match tokio::fs::remove_file(&target).await {
+            Ok(()) => json_response(&mut stream, 200, &serde_json::json!({"ok": true})).await,
+            Err(error) => json_response(&mut stream, 500, &serde_json::json!({"error": format!("Could not delete file: {error}")})).await,
+        };
     }
     if request.method == "POST" && path == "/api/downloads" {
         let payload: NewDownload = match serde_json::from_slice(&request.body) {
