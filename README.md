@@ -134,6 +134,7 @@ Full documentation at [**mesamirh.github.io/MovieBox-Tui**](https://mesamirh.git
 | [Hardware Players](docs/players.md) | Player detection, launch options, and flags |
 | [Live TV & IPTV](docs/tv-mode.md) | M3U playlist import and channel streaming |
 | [Batch Downloads](docs/downloads.md) | HTTP range engine, pause, and resume |
+| [Local Web Downloader](docs/web-downloader.md) | Mobile browser UI with a local Termux download service |
 
 ## Contributing
 
