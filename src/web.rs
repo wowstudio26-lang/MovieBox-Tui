@@ -256,6 +256,11 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<AppState>) -> io::R
         if destination.exists() {
             return json_response(&mut stream, 409, &serde_json::json!({"error": "A file with this name already exists. Remove it or rename the title before downloading again."})).await;
         }
+        let already_queued = state.jobs.lock().unwrap_or_else(|error| error.into_inner()).values()
+            .any(|job| job.path == destination && job.state != "cancelled");
+        if already_queued {
+            return json_response(&mut stream, 409, &serde_json::json!({"error": "This file is already queued or listed in the download manager."})).await;
+        }
         let counter = state.next_id.fetch_add(1, Ordering::Relaxed);
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
         let id = format!("d{now}-{counter}");
@@ -345,6 +350,8 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<AppState>) -> io::R
                                     Err(error) => Err(format!("Could not delete file: {error}")),
                                 }
                             } else {
+                                let _ = tokio::fs::remove_file(append_suffix(&job.path, "part")).await;
+                                let _ = tokio::fs::remove_file(append_suffix(&job.path, "part.json")).await;
                                 Ok(())
                             }
                         }
