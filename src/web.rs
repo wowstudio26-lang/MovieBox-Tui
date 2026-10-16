@@ -407,8 +407,8 @@ fn launch_download(state: Arc<AppState>, id: &str) -> Result<(), String> {
         };
         if remove {
             let _ = tokio::fs::remove_file(&path).await;
-            let _ = tokio::fs::remove_file(path.with_extension("part")).await;
-            let _ = tokio::fs::remove_file(path.with_extension("part.json")).await;
+            let _ = tokio::fs::remove_file(append_suffix(&path, "part")).await;
+            let _ = tokio::fs::remove_file(append_suffix(&path, "part.json")).await;
             if let Some(job) = state.jobs.lock().unwrap_or_else(|error| error.into_inner()).get_mut(&id) {
                 job.state = "cancelled".to_string();
                 job.downloaded = 0;
@@ -595,4 +595,37 @@ async fn respond(stream: &mut TcpStream, status: u16, content_type: &str, body: 
     stream.write_all(header.as_bytes()).await?;
     stream.write_all(body).await?;
     stream.shutdown().await
+}
+
+
+fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".");
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sidecar_suffix_keeps_the_original_extension() {
+        assert_eq!(
+            append_suffix(Path::new("episode.mp4"), "part"),
+            PathBuf::from("episode.mp4.part")
+        );
+        assert_eq!(
+            append_suffix(Path::new("episode.mp4"), "part.json"),
+            PathBuf::from("episode.mp4.part.json")
+        );
+    }
+
+    #[test]
+    fn only_known_media_extensions_are_preserved() {
+        assert_eq!(media_extension("/movie.mp4"), ".mp4");
+        assert_eq!(media_extension("/movie.mkv"), ".mkv");
+        assert_eq!(media_extension("/movie.m3u8"), ".media");
+        assert_eq!(subtitle_extension("/subtitles.vtt"), ".vtt");
+    }
 }
