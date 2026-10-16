@@ -283,7 +283,7 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<AppState>) -> io::R
         if let Err(error) = launch_download(Arc::clone(&state), &id) {
             return json_response(&mut stream, 500, &serde_json::json!({"error": error})).await;
         }
-        return json_response(&mut stream, 202, &serde_json::json!({"id": id, "state": "downloading"})).await;
+        return json_response(&mut stream, 202, &serde_json::json!({"id": id, "state": "queued"})).await;
     }
     if request.method == "POST" && path.starts_with("/api/downloads/") {
         let parts = path.trim_start_matches("/api/downloads/").split('/').collect::<Vec<_>>();
