@@ -58,5 +58,5 @@ A custom destination can be set with MOVIEBOX_DOWNLOAD_DIR before starting the s
 - The initial web service supports direct-file sources only. It intentionally rejects sources marked as segmented/non-direct instead of saving an HLS/DASH manifest as if it were a complete video.
 - Available resolution, audio variants, episode lists, and subtitle choices depend on the source.
 - External subtitles are downloaded as separate files. This milestone does not remux audio/subtitle tracks into a new container.
-- The download queue is currently held in service memory. Partial download data is retained by the existing downloader, but queue entries are not yet restored automatically after the service itself exits.
+- Up to two downloads run concurrently in this milestone. The download queue is currently held in service memory. Partial download data is retained by the existing downloader, but queue entries are not yet restored automatically after the service itself exits.
 - This milestone should be tested on a real Android device before relying on it for large downloads.
