@@ -17,7 +17,7 @@ use tokio::{
 };
 
 use crate::{
-    providers::{ReleaseProvider, models::{MediaType, ProviderKind}},
+    providers::{ReleaseProvider, models::ProviderKind},
     service::MovieBoxService,
 };
 
@@ -206,6 +206,7 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<AppState>) -> io::R
             bytes_per_second: job.bytes_per_second,
             path: display_relative_path(&job.path),
         }).collect::<Vec<_>>();
+        drop(jobs);
         return json_response(&mut stream, 200, &summaries).await;
     }
     if request.method == "GET" && path == "/api/library" {
@@ -256,9 +257,16 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<AppState>) -> io::R
         let counter = state.next_id.fetch_add(1, Ordering::Relaxed);
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
         let id = format!("d{now}-{counter}");
+        let job_title = if payload.subtitle {
+            format!("{} · {}", payload.title, payload.subtitle_language)
+        } else if is_series {
+            format!("{} S{:02}E{:02}", payload.title, payload.season, payload.episode)
+        } else {
+            payload.title.clone()
+        };
         let job = DownloadJob {
             id: id.clone(),
-            title: payload.title.clone(),
+            title: job_title,
             url: parsed_url.to_string(),
             path: destination,
             headers: payload.headers,
@@ -400,7 +408,7 @@ fn launch_download(state: Arc<AppState>, id: &str) -> Result<(), String> {
         if remove {
             let _ = tokio::fs::remove_file(&path).await;
             let _ = tokio::fs::remove_file(path.with_extension("part")).await;
-            let _ = tokio::fs::remove_file(path.with_extension("json")).await;
+            let _ = tokio::fs::remove_file(path.with_extension("part.json")).await;
             if let Some(job) = state.jobs.lock().unwrap_or_else(|error| error.into_inner()).get_mut(&id) {
                 job.state = "cancelled".to_string();
                 job.downloaded = 0;
